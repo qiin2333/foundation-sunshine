@@ -1278,13 +1278,13 @@ namespace platf::dxgi {
         // We got a new frame from DesktopDuplication...
         if (blend_mouse_cursor_flag) {
           // ...and we need to blend the mouse cursor onto it.
-          // Copy the frame to intermediate surface so we can blend this and future mouse cursor updates
-          // without new frames from DesktopDuplication. We use direct3d surface directly here and not
-          // an image from pull_free_image_cb mainly because it's lighter (surface sharing between
-          // direct3d devices produce significant memory overhead).
-          last_frame_action = lfa::copy_src_to_surface;
-          // Copy the intermediate surface to a new image from pull_free_image_cb and blend the mouse cursor onto it.
-          out_frame_action = ofa::copy_last_surface_and_blend_cursor;
+          // Optimization: Directly copy to target image and blend cursor, avoiding intermediate surface copy.
+          // This reduces one texture copy operation when we have a new frame.
+          // We still use intermediate surface for cursor-only updates (no new frame) to avoid
+          // memory overhead from sharing images between direct3d devices.
+          last_frame_action = lfa::copy_src_to_img;
+          // Blend cursor directly onto the image we just copied to.
+          out_frame_action = ofa::copy_last_surface_and_blend_cursor;  // Reused for direct blend
         }
         else {
           // ...and we don't need to blend the mouse cursor.
@@ -1487,23 +1487,59 @@ namespace platf::dxgi {
       }
 
       case ofa::copy_last_surface_and_blend_cursor: {
-        auto p_surface = std::get_if<texture2d_t>(&last_frame_variant);
-        if (!p_surface) {
-          BOOST_LOG(error) << "Logical error at " << __FILE__ << ":" << __LINE__;
-          return capture_e::error;
-        }
         if (!blend_mouse_cursor_flag) {
           BOOST_LOG(error) << "Logical error at " << __FILE__ << ":" << __LINE__;
           return capture_e::error;
         }
 
-        if (!pull_free_image_cb(img_out)) return capture_e::interrupted;
+        // Optimization: Check if we have an image (from direct copy) or surface (from previous frame)
+        auto p_img = std::get_if<std::shared_ptr<platf::img_t>>(&last_frame_variant);
+        auto p_surface = std::get_if<texture2d_t>(&last_frame_variant);
+        
+        if (p_img && p_img->use_count() == 1) {
+          // Optimization: We have a direct image copy that's not yet used by encoder,
+          // blend cursor directly onto it to avoid an extra texture copy.
+          img_out = *p_img;
+          auto d3d_img = std::static_pointer_cast<img_d3d_t>(img_out);
+          texture_lock_helper lock_helper(d3d_img->capture_mutex.get());
+          if (!lock_helper.lock()) {
+            BOOST_LOG(error) << "Failed to lock capture texture for cursor blend";
+            return capture_e::error;
+          }
+          blend_cursor(*d3d_img);
+        }
+        else if (p_surface) {
+          // We have an intermediate surface, copy it first then blend
+          if (!pull_free_image_cb(img_out)) return capture_e::interrupted;
 
-        auto [d3d_img, lock] = get_locked_d3d_img(img_out);
-        if (!d3d_img) return capture_e::error;
+          auto [d3d_img, lock] = get_locked_d3d_img(img_out);
+          if (!d3d_img) return capture_e::error;
 
-        device_ctx->CopyResource(d3d_img->capture_texture.get(), p_surface->get());
-        blend_cursor(*d3d_img);
+          device_ctx->CopyResource(d3d_img->capture_texture.get(), p_surface->get());
+          blend_cursor(*d3d_img);
+        }
+        else if (p_img) {
+          // Image is already in use by encoder, we need to get a new one
+          // This case is rare and indicates the image was consumed before cursor blend
+          // Fall back to creating a surface and copying (original behavior)
+          if (!pull_free_image_cb(img_out)) return capture_e::interrupted;
+
+          auto [d3d_img, lock] = get_locked_d3d_img(img_out);
+          if (!d3d_img) return capture_e::error;
+
+          // Copy from the image that's in use (it should still be valid for reading)
+          // Note: This creates an extra copy, but it's a rare edge case
+          auto d3d_img_src = std::static_pointer_cast<img_d3d_t>(*p_img);
+          texture_lock_helper src_lock_helper(d3d_img_src->capture_mutex.get());
+          if (src_lock_helper.lock()) {
+            device_ctx->CopyResource(d3d_img->capture_texture.get(), d3d_img_src->capture_texture.get());
+          }
+          blend_cursor(*d3d_img);
+        }
+        else {
+          BOOST_LOG(error) << "Logical error at " << __FILE__ << ":" << __LINE__;
+          return capture_e::error;
+        }
         break;
       }
 
@@ -1789,22 +1825,58 @@ namespace platf::dxgi {
    */
   capture_e
   display_wgc_vram_t::snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) {
+    // Check if window is still valid (if capturing a window)
+    // If window becomes invalid (closed, minimized, hidden), fall back to display capture
+    if (!dup.is_window_valid()) {
+      BOOST_LOG(warning) << "Captured window is no longer valid (closed, minimized, or hidden), falling back to display capture"sv;
+      return capture_e::reinit;
+    }
+    
     texture2d_t src;
     uint64_t frame_qpc;
     dup.set_cursor_visible(cursor_visible);
     auto capture_status = dup.next_frame(timeout, &src, frame_qpc);
-    if (capture_status != capture_e::ok)
+    if (capture_status != capture_e::ok) {
+      // If we're capturing a window and getting timeouts/errors, check if window is still valid
+      if (dup.captured_window_hwnd != nullptr) {
+        // Simplified: Any error or timeout means window might have changed, check validity
+        if (!dup.is_window_valid()) {
+          BOOST_LOG(warning) << "Captured window is no longer valid, reinitializing capture"sv;
+          return capture_e::reinit;
+        }
+      }
       return capture_status;
+    }
 
     auto frame_timestamp = std::chrono::steady_clock::now() - qpc_time_difference(qpc_counter(), frame_qpc);
     D3D11_TEXTURE2D_DESC desc;
     src->GetDesc(&desc);
 
-    // It's possible for our display enumeration to race with mode changes and result in
-    // mismatched image pool and desktop texture sizes. If this happens, just reinit again.
-    if (desc.Width != width_before_rotation || desc.Height != height_before_rotation) {
-      BOOST_LOG(info) << "Capture size changed ["sv << width << 'x' << height << " -> "sv << desc.Width << 'x' << desc.Height << ']';
-      return capture_e::reinit;
+    // Get the actual captured frame dimensions
+    int frame_width = static_cast<int>(desc.Width);
+    int frame_height = static_cast<int>(desc.Height);
+    
+    // For window capture, check if size changed and handle it
+    if (dup.captured_window_hwnd != nullptr) {
+      int expected_width = dup.window_capture_width > 0 ? dup.window_capture_width : width_before_rotation;
+      int expected_height = dup.window_capture_height > 0 ? dup.window_capture_height : height_before_rotation;
+      
+      if (frame_width != expected_width || frame_height != expected_height) {
+        BOOST_LOG(info) << "Window capture size changed ["sv << expected_width << 'x' << expected_height 
+                         << " -> "sv << frame_width << 'x' << frame_height << ']';
+        // Update stored dimensions
+        dup.window_capture_width = frame_width;
+        dup.window_capture_height = frame_height;
+        // Trigger reinit to recreate all resources (images, textures, etc.) with new size
+        return capture_e::reinit;
+      }
+    }
+    else {
+      // For display capture, check against display dimensions
+      if (desc.Width != width_before_rotation || desc.Height != height_before_rotation) {
+        BOOST_LOG(info) << "Capture size changed ["sv << width << 'x' << height << " -> "sv << desc.Width << 'x' << desc.Height << ']';
+        return capture_e::reinit;
+      }
     }
 
     // It's also possible for the capture format to change on the fly. If that happens,
@@ -1844,6 +1916,22 @@ namespace platf::dxgi {
   capture_e
   display_wgc_vram_t::release_snapshot() {
     return dup.release_frame();
+  }
+
+  std::shared_ptr<platf::img_t>
+  display_wgc_vram_t::alloc_img() {
+    auto img = std::make_shared<img_d3d_t>();
+    
+    // For window capture, use window capture dimensions; for display capture, use display dimensions
+    int img_width = dup.window_capture_width > 0 ? dup.window_capture_width : width_before_rotation;
+    int img_height = dup.window_capture_height > 0 ? dup.window_capture_height : height_before_rotation;
+    
+    img->width = img_width;
+    img->height = img_height;
+    img->id = next_image_id++;
+    img->blank = true;
+
+    return img;
   }
 
   int
@@ -2085,10 +2173,56 @@ namespace platf::dxgi {
 
   std::unique_ptr<nvenc_encode_device_t>
   display_vram_t::make_nvenc_encode_device(pix_fmt_e pix_fmt) {
+    // For hybrid graphics laptops, NVENC encoder requires NVIDIA GPU,
+    // but display capture may use integrated graphics (built-in screen).
+    // We need to find the NVIDIA adapter for encoding, not the capture adapter.
+    adapter_t::pointer nvenc_adapter_p = nullptr;
+    adapter_t nvenc_adapter;  // Smart pointer to manage adapter lifetime if we find a different one
+    
+    // Check if current adapter is NVIDIA
+    DXGI_ADAPTER_DESC adapter_desc;
+    adapter->GetDesc(&adapter_desc);
+    
+    if (adapter_desc.VendorId == 0x10de) {  // NVIDIA
+      // Current adapter is already NVIDIA, use it
+      nvenc_adapter_p = adapter.get();
+    }
+    else {
+      // Current adapter is not NVIDIA (likely integrated graphics),
+      // find the NVIDIA adapter for encoding
+      factory1_t factory;
+      HRESULT status = CreateDXGIFactory1(IID_IDXGIFactory1, (void **) &factory);
+      if (SUCCEEDED(status)) {
+        adapter_t::pointer adapter_p;
+        for (int x = 0; factory->EnumAdapters1(x, &adapter_p) != DXGI_ERROR_NOT_FOUND; ++x) {
+          dxgi::adapter_t adapter_tmp { adapter_p };
+          DXGI_ADAPTER_DESC1 adapter_desc1;
+          adapter_tmp->GetDesc1(&adapter_desc1);
+          
+          if (adapter_desc1.VendorId == 0x10de) {  // NVIDIA
+            // Found NVIDIA adapter, use it
+            nvenc_adapter = std::move(adapter_tmp);
+            nvenc_adapter_p = nvenc_adapter.get();
+            BOOST_LOG(info) << "Found NVIDIA GPU for NVENC encoding: " << platf::to_utf8(adapter_desc1.Description)
+                            << " (display capture uses: " << platf::to_utf8(adapter_desc.Description) << ")";
+            break;
+          }
+        }
+      }
+      
+      if (!nvenc_adapter_p) {
+        BOOST_LOG(error) << "Failed to find NVIDIA GPU adapter for NVENC encoding. "
+                         << "Current adapter (VendorId: 0x" << util::hex(adapter_desc.VendorId).to_string_view()
+                         << ") does not support NVENC.";
+        return nullptr;
+      }
+    }
+    
     auto device = std::make_unique<d3d_nvenc_encode_device_t>();
-    if (!device->init_device(shared_from_this(), adapter.get(), pix_fmt)) {
+    if (!device->init_device(shared_from_this(), nvenc_adapter_p, pix_fmt)) {
       return nullptr;
     }
+    
     return device;
   }
 

@@ -429,7 +429,14 @@ namespace rtsp_stream {
 
       acceptor.set_option(boost::asio::socket_base::reuse_address { true });
 
-      acceptor.bind(tcp::endpoint(af == net::IPV4 ? tcp::v4() : tcp::v6(), port), ec);
+      auto bind_addr_str = net::get_bind_address(af);
+      const auto bind_addr = boost::asio::ip::make_address(bind_addr_str, ec);
+      if (ec) {
+        BOOST_LOG(error) << "Invalid bind address: "sv << bind_addr_str << " - " << ec.message();
+        return -1;
+      }
+
+      acceptor.bind(tcp::endpoint(bind_addr, port), ec);
       if (ec) {
         return -1;
       }
@@ -1076,6 +1083,16 @@ namespace rtsp_stream {
       config.monitor.enableIntraRefresh = util::from_view(args.at("x-ss-video[0].intraRefresh"sv));
 
       configuredBitrateKbps = util::from_view(args.at("x-ml-video.configuredBitrateKbps"sv));
+      
+      // Set display_name from session environment or use global configuration
+      if (auto it = session.env.find("SUNSHINE_CLIENT_DISPLAY_NAME"); it != session.env.end()) {
+        config.monitor.display_name = it->to_string();
+        BOOST_LOG(info) << "Session using specified display: " << config.monitor.display_name;
+      }
+      else {
+        // Use global configuration if not specified by session
+        config.monitor.display_name = config::video.output_name;
+      }
     }
     catch (std::out_of_range &) {
       respond(sock, session, &option, 400, "BAD REQUEST", req->sequenceNumber, {});

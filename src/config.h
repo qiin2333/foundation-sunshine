@@ -92,6 +92,8 @@ namespace config {
     };
 
     std::string output_name;
+    std::string capture_target;  // "display" or "window" - determines whether to capture display or window
+    std::string window_title;     // Window title to capture when capture_target="window"
     int display_device_prep;
     int resolution_change;
     std::string manual_resolution;
@@ -220,6 +222,7 @@ namespace config {
 
     std::uint16_t port;
     std::string address_family;
+    std::string bind_address;
 
     std::string log_file;
     bool restore_log;  // 是否恢复日志文件（true=恢复，false=覆盖）

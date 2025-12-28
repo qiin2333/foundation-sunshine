@@ -128,9 +128,9 @@ namespace display_device {
   };
 
   session_t::deinit_t::~deinit_t() {
-    // Stop vdd timer before destruction
-    // session_t::get().vdd_timer->setup_timer(nullptr);
-    session_t::get().restore_state();
+    // 不在析构函数中调用 restore_state()
+    // 原因：析构函数在程序退出时被调用，此时 boost::log、timer 等资源可能已被销毁
+    // 解决方案：在 main.cpp 的信号处理程序中显式调用 restore_state()
   }
 
   session_t &
@@ -182,12 +182,17 @@ namespace display_device {
     }
 
     /**
-     * @brief Wait for VDD device to initialize.
+     * @brief Wait for VDD device to initialize and be fully ready.
      * @param device_zako Output parameter for the device ID.
      * @param max_attempts Maximum number of retry attempts.
      * @param initial_delay Initial delay between retries.
      * @param max_delay Maximum delay between retries.
-     * @return true if device was found, false otherwise.
+     * @return true if device was found and is ready, false otherwise.
+     *
+     * This function checks multiple conditions to ensure the VDD device is fully ready:
+     * 1. Device can be found by friendly name
+     * 2. Device is in the active device list
+     * 3. Device has a valid source mode (can be queried for display configuration)
      */
     bool
     wait_for_vdd_device(std::string &device_zako, int max_attempts,
@@ -196,12 +201,27 @@ namespace display_device {
       return vdd_utils::retry_with_backoff(
         [&device_zako]() {
           device_zako = display_device::find_device_by_friendlyname(ZAKO_NAME);
-          return !device_zako.empty();
+          if (device_zako.empty()) {
+            return false;
+          }
+
+          const auto display_data = w_utils::query_display_config(w_utils::ACTIVE_ONLY_DEVICES);
+          if (!display_data) {
+            return false;
+          }
+
+          const auto path = w_utils::get_active_path(device_zako, display_data->paths);
+          if (!path) {
+            return false;
+          }
+
+          const auto source_index = w_utils::get_source_index(*path, display_data->modes);
+          return source_index && w_utils::get_source_mode(source_index, display_data->modes);
         },
         { .max_attempts = max_attempts,
           .initial_delay = initial_delay,
           .max_delay = max_delay,
-          .context = "等待VDD设备初始化" });
+          .context = "等待VDD设备初始化并完全就绪" });
     }
 
     /**
@@ -276,7 +296,7 @@ namespace display_device {
           BOOST_LOG(warning) << "Failed to apply display settings - will stop trying, but will allow stream to continue.";
           // WARNING! After call to the method below, this lambda function is no longer valid!
           // DO NOT access anything from the capture list!
-          restore_state_impl();
+          restore_state_impl(revert_reason_e::config_cleanup);
         }
         return true;
       });
@@ -291,7 +311,7 @@ namespace display_device {
       timer->setup_timer(nullptr);
     }
     else {
-      restore_state_impl();
+      restore_state_impl(revert_reason_e::config_cleanup);
     }
   }
 
@@ -345,7 +365,7 @@ namespace display_device {
     const std::string current_client_id = get_client_id_from_session(session);
     const vdd_utils::hdr_brightness_t hdr_brightness { session.max_nits, session.min_nits, session.max_full_nits };
     const vdd_utils::physical_size_t physical_size = vdd_utils::get_client_physical_size(session.client_name);
-    
+
     auto device_zako = display_device::find_device_by_friendlyname(ZAKO_NAME);
 
     // Rebuild VDD device on client switch
@@ -372,7 +392,7 @@ namespace display_device {
     }
 
     // Wait for device to be ready
-    if (!wait_for_vdd_device(device_zako, 10, 100ms, 500ms)) {
+    if (!wait_for_vdd_device(device_zako, 5, 200ms, 1000ms)) {
       BOOST_LOG(error) << "VDD设备初始化失败，尝试恢复";
       vdd_utils::disable_enable_vdd();
       std::this_thread::sleep_for(2s);
@@ -394,10 +414,18 @@ namespace display_device {
     current_vdd_client_id = current_client_id;
     BOOST_LOG(info) << "成功配置VDD设备: " << device_zako;
 
+    // Ensure VDD is in extended mode
     if (vdd_utils::ensure_vdd_extended_mode(device_zako)) {
       BOOST_LOG(info) << "已将VDD切换到扩展模式";
+      std::this_thread::sleep_for(500ms);
     }
-    vdd_utils::set_hdr_state(false);
+
+    // Set HDR state with retry
+    if (!vdd_utils::set_hdr_state(false)) {
+      BOOST_LOG(debug) << "首次设置HDR状态失败，等待设备稳定后重试";
+      std::this_thread::sleep_for(500ms);
+      vdd_utils::set_hdr_state(false);
+    }
   }
 
   void
@@ -414,7 +442,7 @@ namespace display_device {
   }
 
   void
-  session_t::restore_state_impl() {
+  session_t::restore_state_impl(revert_reason_e reason) {
     // 检测RDP会话
     if (w_utils::is_any_rdp_session_active()) {
       BOOST_LOG(info) << "Detected RDP remote session, disabling display settings recovery";
@@ -422,7 +450,18 @@ namespace display_device {
       return;
     }
 
-    if (!settings.is_changing_settings_going_to_fail() && settings.revert_settings()) {
+    // 在串流结束时处理VDD销毁（即使锁屏也可以执行清理工作）
+    // 注意：创建VDD需要在 revert_settings 中处理，因为需要用户会话解锁才能被DXGI捕获
+    if (reason == revert_reason_e::stream_ended) {
+      auto devices = display_device::enum_available_devices();
+      if (devices.size() > 1 && is_display_on()) {
+        // 销毁VDD：可以在锁屏状态下执行（清理工作）
+        BOOST_LOG(info) << "检测到多个显示器，关闭VDD" << (settings.is_changing_settings_going_to_fail() ? "（锁屏状态）" : "");
+        destroy_vdd_monitor();
+      }
+    }
+
+    if (!settings.is_changing_settings_going_to_fail() && settings.revert_settings(reason)) {
       stop_timer_and_clear_vdd_state();
     }
     else {
@@ -434,7 +473,7 @@ namespace display_device {
       static int retry_count = 0;
       const int max_retries = 20;
 
-      timer->setup_timer([this]() {
+      timer->setup_timer([this, reason]() {
         if (settings.is_changing_settings_going_to_fail()) {
           retry_count++;
           if (retry_count >= max_retries) {
@@ -447,7 +486,7 @@ namespace display_device {
         }
 
         // 只恢复一次
-        auto result = settings.revert_settings();
+        auto result = settings.revert_settings(reason);
         BOOST_LOG(info) << "尝试恢复显示设置" << (result ? "成功" : "失败") << "，不再重试";
         clear_vdd_state();
         return true;
