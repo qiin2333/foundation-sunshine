@@ -5,6 +5,7 @@
 #include "process.h"
 
 #include <future>
+#include <iomanip>
 #include <queue>
 #include <unordered_map>
 
@@ -365,7 +366,7 @@ namespace stream {
     std::thread video_thread;
     std::thread audio_thread;
     std::thread control_thread;
-    std::thread mic_thread;  // 新增麦克风接收线程
+    std::thread mic_thread;
 
     asio::io_context io_context;
 
@@ -382,6 +383,9 @@ namespace stream {
     std::optional<crypto::cipher::cbc_t> mic_cipher;
     crypto::aes_t mic_iv;
     std::mutex mic_cipher_mutex;
+
+    std::map<std::string, std::string> client_ip_to_name;
+    std::mutex client_name_mutex;
   };
 
   struct session_t {
@@ -1284,18 +1288,26 @@ namespace stream {
     auto &io = ctx.io_context;
 
     udp::endpoint peer;
-    std::array<char, 2048> buffer;
+    std::array<char, 2048> mic_recv_buffer;
     bool mic_device_initialized = false;
 
-    auto process_audio_data = [&](const uint8_t *audio_data, size_t data_size, uint16_t sequence_number) {
+    // 麦克风统计结构体（按客户端地址分组）
+    struct MicStats {
+      uint64_t total_packets = 0;
+      uint64_t decrypt_success = 0;
+      uint64_t decrypt_failed = 0;
+      uint64_t invalid_data = 0;
+    };
+    std::map<std::string, MicStats> client_stats;
+
+    auto process_audio_data = [&](const uint8_t *audio_data, size_t data_size, uint16_t sequence_number, const std::string &peer_addr) {
       if (!ctx.mic_socket_enabled.load()) {
         return;
       }
 
-      // 自动检测数据是否加密：根据数据长度判断
-      // CBC 模式加密后的数据必须是 16 字节的倍数（PKCS5 填充）
-      // 如果数据长度不是 16 的倍数，说明是未加密数据
-      bool is_encrypted = (data_size % 16 == 0) && ctx.mic_encryption_enabled.load();
+      // 根据 RTSP 协商的配置判断是否启用加密
+      // 不依赖数据长度猜测，直接使用会话配置作为权威来源
+      bool is_encrypted = ctx.mic_encryption_enabled.load();
       
       if (is_encrypted && ctx.mic_cipher.has_value()) {
         std::lock_guard<std::mutex> lg(ctx.mic_cipher_mutex);
@@ -1303,85 +1315,66 @@ namespace stream {
         // 客户端使用: baseIv[0:4] (Big Endian) + (sequenceNumber - 1) & 0xFFFF
         // 这与音频加密不同，音频加密使用: avRiKeyId + sequenceNumber
         // ctx.mic_iv 的前 4 字节存储的是 baseIv（大端序），对应客户端的 remoteInputAesIv
-        crypto::aes_t current_iv = ctx.mic_iv;
+        crypto::aes_t current_iv(16);  // 确保是 16 字节
         uint32_t baseIvVal = util::endian::big<std::uint32_t>(*(std::uint32_t *) ctx.mic_iv.data());
-        // 客户端使用 (sequenceNumber - 1) & 0xFFFF，所以服务端也要匹配
-        uint32_t ivSeq = baseIvVal + ((sequence_number - 1) & 0xFFFF);
+        // 服务端收到的 sequence_number 就是包里的实际值，直接使用即可（不需要减1），客户端减1是因为它的 sequenceNumber 变量在写入包后就递增了
+        uint32_t ivSeq = baseIvVal + (sequence_number & 0xFFFF);
         *(std::uint32_t *) current_iv.data() = util::endian::big<std::uint32_t>(ivSeq);
-        
+        // 确保后 12 字节为 0（客户端构建 IV 时后 12 字节也是 0）
+        std::memset(current_iv.data() + 4, 0, 12);
+        // 更新统计
+        auto &stats = client_stats[peer_addr];
+        stats.total_packets++;
         std::vector<std::uint8_t> plaintext;
         std::string_view cipher_view((const char *) audio_data, data_size);
-        
         if (ctx.mic_cipher->decrypt(cipher_view, plaintext, &current_iv) != 0) {
-          // 解密失败：可能是字节序错误、密钥错误、或数据确实未加密
-          // 重要：不能直接将密文当作明文播放，这会导致爆音
-          // 如果数据长度是 16 的倍数但解密失败，很可能是加密数据，应该丢弃而不是播放
-          BOOST_LOG(warning) << "Failed to decrypt MIC data (size=" << data_size 
-                            << ", seq=" << sequence_number 
-                            << "). Data appears encrypted but decryption failed. "
-                            << "Dropping packet to avoid playing ciphertext as audio.";
-          ctx.mic_encryption_enabled.store(false);
-          return;  // 丢弃数据包，不播放
+          // 解密失败：可能是网络损坏包、IV不匹配、或密钥错误
+          stats.decrypt_failed++;
+          return;  // 丢弃数据包
         }
+        
+        stats.decrypt_success++;
         
         if (plaintext.size() > 0) {
           // 简单的有效性检查：Opus 数据不应该全是 0 或全是 0xFF
-          bool looks_valid = false;
-          if (plaintext.size() >= 2) {
-            // 检查前几个字节，Opus 数据通常有特定的模式
-            // 如果解密后的数据看起来像随机数据（可能是解密失败），应该丢弃
+          bool looks_valid = true;
+          if (plaintext.size() >= 4) {
             uint8_t first_byte = plaintext[0];
             uint8_t second_byte = plaintext[1];
-            // 简单的启发式检查：如果前两个字节都是 0 或都是 0xFF，可能有问题
-            if (!((first_byte == 0 && second_byte == 0) || 
-                  (first_byte == 0xFF && second_byte == 0xFF))) {
-              looks_valid = true;
+            uint8_t third_byte = plaintext[2];
+            uint8_t fourth_byte = plaintext[3];
+            bool all_zero = (first_byte == 0 && second_byte == 0 && third_byte == 0 && fourth_byte == 0);
+            bool all_ff = (first_byte == 0xFF && second_byte == 0xFF && third_byte == 0xFF && fourth_byte == 0xFF);
+            if (all_zero || all_ff) {
+              looks_valid = false;
+              stats.invalid_data++;
             }
-          } else {
-            looks_valid = true;  // 数据太短，无法验证，假设有效
           }
+          // 注意：如果 plaintext.size() < 4，无法验证，假设有效并继续处理
           
           if (!looks_valid) {
-            BOOST_LOG(warning) << "Decrypted MIC data looks invalid (possible decryption error). "
-                              << "Dropping packet to avoid playing garbage audio.";
             return;  // 丢弃数据包
           }
         }
         
         // 解密成功且数据看起来有效
-        if (int result = audio::write_mic_data(plaintext.data(), plaintext.size()); result < 0) {
-          BOOST_LOG(debug) << "Failed to write decrypted microphone data (audio context may not be active)";
-        }
+        audio::write_mic_data(plaintext.data(), plaintext.size());
         return;
       }
       
       // 未加密数据或加密未启用，直接处理
-      if (ctx.mic_encryption_enabled.load() && data_size % 16 != 0) {
-        // 如果加密标志已启用但数据不是 16 的倍数，说明客户端未实际启用加密
-        // 自动禁用加密标志，避免后续警告
-        BOOST_LOG(debug) << "MIC encryption flag is set but data is not encrypted (size not multiple of 16). "
-                        << "Disabling encryption flag.";
-        ctx.mic_encryption_enabled.store(false);
-      }
-      
-      if (int result = audio::write_mic_data(audio_data, data_size); result < 0) {
-        BOOST_LOG(debug) << "Failed to write microphone data (audio context may not be active)";
-      }
-
-      if (int result = audio::write_mic_data(audio_data, data_size); result < 0) {
-        BOOST_LOG(debug) << "Failed to write microphone data (audio context may not be active)";
-      }
+      audio::write_mic_data(audio_data, data_size);
     };
 
     std::function<void(const boost::system::error_code, size_t)> mic_recv_func;
-    mic_recv_func = [&](const boost::system::error_code &ec, size_t bytes) {
+    mic_recv_func = [&](const boost::system::error_code &ec, size_t received_bytes) {
       if (!ctx.mic_socket_enabled.load()) {
         return;
       }
 
       auto fg = util::fail_guard([&]() {
         if (ctx.mic_socket_enabled.load()) {
-          ctx.mic_sock.async_receive_from(asio::buffer(buffer), peer, 0, mic_recv_func);
+          ctx.mic_sock.async_receive_from(asio::buffer(mic_recv_buffer), peer, 0, mic_recv_func);
         }
       });
 
@@ -1393,39 +1386,52 @@ namespace stream {
         return;
       }
 
-      if (bytes < sizeof(RTP_PACKET)) {
+      if (received_bytes < sizeof(RTP_PACKET)) {
         return;
       }
 
+      // 获取客户端标识：优先使用client_name，回退到IP地址
+      std::string client_ip = peer.address().to_string();
+      std::string client_id;
+      {
+        std::lock_guard<std::mutex> lg(ctx.client_name_mutex);
+        auto it = ctx.client_ip_to_name.find(client_ip);
+        if (it != ctx.client_ip_to_name.end()) {
+          client_id = it->second;  // 使用client_name
+        } else {
+          client_id = client_ip;  // 回退到IP
+        }
+      }
+
       // 尝试16位扩展包类型
-      if (bytes >= sizeof(rtp_packet_ext_t)) {
-        auto *header_ext = (rtp_packet_ext_t *) buffer.data();
+      if (received_bytes >= sizeof(rtp_packet_ext_t)) {
+        auto *header_ext = (rtp_packet_ext_t *) mic_recv_buffer.data();
         if (header_ext->packetType == packetTypes[IDX_MIC_DATA]) {
           size_t header_size = sizeof(rtp_packet_ext_t);
-          if (bytes > header_size) {
+          if (received_bytes > header_size) {
             uint16_t sequence_number = util::endian::little(header_ext->sequenceNumber);
-            process_audio_data(reinterpret_cast<const uint8_t *>(buffer.data()) + header_size, 
-                              bytes - header_size, sequence_number);
+            process_audio_data(reinterpret_cast<const uint8_t *>(mic_recv_buffer.data()) + header_size, received_bytes - header_size, sequence_number, client_id);
           }
           return;
         }
       }
 
       // 8位包类型
-      auto *header = (mic_packet_t *) buffer.data();
+      auto *header = (mic_packet_t *) mic_recv_buffer.data();
       if (header->rtp.packetType == MIC_PACKET_TYPE_OPUS) {
         size_t header_size = sizeof(mic_packet_t);
-        if (bytes > header_size) {
+        if (received_bytes > header_size) {
           // 客户端按小端序发送序列号（MicrophoneStream.java 使用 LITTLE_ENDIAN）
           // 服务端必须按小端序读取，否则会读错（比如 1 会读成 256）
           uint16_t sequence_number = util::endian::little(header->rtp.sequenceNumber);
-          size_t data_size = bytes - header_size;
-          BOOST_LOG(debug) << "Received MIC packet: total=" << bytes 
+          size_t data_size = received_bytes - header_size;
+          
+          BOOST_LOG(debug) << "Received MIC packet: total=" << received_bytes 
                           << " bytes, header=" << header_size 
                           << " bytes, data=" << data_size 
-                          << " bytes, sequenceNumber=" << sequence_number << " (little-endian)";
-          process_audio_data(reinterpret_cast<const uint8_t *>(buffer.data()) + header_size, 
-                            data_size, sequence_number);
+                          << " bytes, sequenceNumber=" << sequence_number << " (little-endian)"
+                          << " from " << client_id;
+          process_audio_data(reinterpret_cast<const uint8_t *>(mic_recv_buffer.data()) + header_size, data_size, sequence_number, client_id);
         }
       }
     };
@@ -1456,6 +1462,21 @@ namespace stream {
 
     if (mic_device_initialized) {
       audio::release_mic_redirect_device();
+    }
+
+    // 打印所有客户端的麦克风解密统计
+    if (!client_stats.empty()) {
+      BOOST_LOG(info) << "=== Microphone Decryption Stats Summary ===";
+      for (const auto &[client, stats] : client_stats) {
+        if (stats.total_packets > 0) {
+          double success_rate = (double)stats.decrypt_success / stats.total_packets * 100.0;
+          BOOST_LOG(info) << "Client " << client << ": "
+                         << "total=" << stats.total_packets
+                         << ", success=" << stats.decrypt_success << " (" << std::fixed << std::setprecision(1) << success_rate << "%)"
+                         << ", failed=" << stats.decrypt_failed
+                         << ", invalid=" << stats.invalid_data;
+        }
+      }
     }
 
     BOOST_LOG(debug) << "Microphone receive thread ended";
@@ -2137,12 +2158,23 @@ namespace stream {
     ctx.video_sock.close();
     ctx.audio_sock.close();
 
-    // 确保麦克风socket已关闭并重置计数器
+    // 确保麦克风socket已关闭并清理敏感数据
     if (ctx.mic_socket_enabled.load()) {
       ctx.mic_socket_enabled.store(false);
       ctx.mic_sock.close();
       ctx.mic_sessions_count.store(0);
-      BOOST_LOG(debug) << "Microphone socket closed during broadcast shutdown";
+      
+      // 安全清理：清零所有麦克风加密相关的敏感数据
+      {
+        std::lock_guard<std::mutex> lg(ctx.mic_cipher_mutex);
+        if (ctx.mic_cipher.has_value()) {
+          ctx.mic_cipher.reset();  // 销毁cipher对象并释放密钥
+        }
+        std::memset(ctx.mic_iv.data(), 0, ctx.mic_iv.size());  // 清零IV
+        ctx.mic_encryption_enabled.store(false);
+      }
+      
+      BOOST_LOG(debug) << "Microphone socket closed and encryption context securely cleared";
     }
 
     video_packets.reset();
@@ -2432,6 +2464,15 @@ namespace stream {
           if (session.audio.enable_mic) {
             session.broadcast_ref->mic_sessions_count.fetch_add(1);
             session.broadcast_ref->mic_socket_enabled.store(true);
+            
+            // 注册客户端IP到名称的映射（用于麦克风统计日志）
+            std::string client_ip = session.audio.peer.address().to_string();
+            {
+              std::lock_guard<std::mutex> lg(session.broadcast_ref->client_name_mutex);
+              session.broadcast_ref->client_ip_to_name[client_ip] = session.client_name;
+              BOOST_LOG(debug) << "Mic Registered client mapping: " << client_ip << " -> " << session.client_name;
+            }
+            
             // 检查是否需要启用 MIC 加密
             bool should_enable_mic_encryption = (session.config.encryptionFlagsEnabled & SS_ENC_MIC) != 0;
             if (should_enable_mic_encryption) {
@@ -2487,6 +2528,15 @@ namespace stream {
           if (session.audio.enable_mic) {
             session.broadcast_ref->mic_sessions_count.fetch_add(1);
             session.broadcast_ref->mic_socket_enabled.store(true);
+            
+            // 注册客户端IP到名称的映射
+            std::string client_ip = session.audio.peer.address().to_string();
+            {
+              std::lock_guard<std::mutex> lg(session.broadcast_ref->client_name_mutex);
+              session.broadcast_ref->client_ip_to_name[client_ip] = session.client_name;
+              BOOST_LOG(debug) << "Registered client mapping: " << client_ip << " -> " << session.client_name;
+            }
+            
             BOOST_LOG(debug) << "Microphone socket enabled for additional session";
           }
         }
