@@ -241,9 +241,6 @@ namespace stream {
     AUDIO_FEC_HEADER fecHeader;
   };
 
-  // 麦克风数据包类型
-  constexpr std::uint8_t MIC_PACKET_TYPE_OPUS = 0x61;  // 'a'
-
   struct mic_packet_t {
     RTP_PACKET rtp;
   };
@@ -1453,7 +1450,7 @@ namespace stream {
         mic_device_initialized = true;
       }
 
-      ctx.mic_sock.async_receive_from(asio::buffer(buffer), peer, 0, mic_recv_func);
+      ctx.mic_sock.async_receive_from(asio::buffer(mic_recv_buffer), peer, 0, mic_recv_func);
 
       while (ctx.mic_socket_enabled.load() && !broadcast_shutdown_event->peek()) {
         io.run();
