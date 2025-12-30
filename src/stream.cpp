@@ -381,6 +381,9 @@ namespace stream {
     crypto::aes_t mic_iv;
     std::mutex mic_cipher_mutex;
 
+    // TODO: 未来版本应当强制启用麦克风加密，防止被窃听
+    std::atomic<bool> mic_reject_plaintext { false };
+
     std::map<std::string, std::string> client_ip_to_name;
     std::mutex client_name_mutex;
   };
@@ -1359,6 +1362,12 @@ namespace stream {
         return;
       }
       
+      // 安全模式：拒绝明文数据
+      if (ctx.mic_reject_plaintext.load()) {
+        BOOST_LOG(warning) << "Rejected plaintext microphone data (mic_reject_plaintext enabled)";
+        return;
+      }
+      
       // 未加密数据或加密未启用，直接处理
       audio::write_mic_data(audio_data, data_size);
     };
@@ -1376,6 +1385,10 @@ namespace stream {
       });
 
       if (ec) {
+        if (ec == boost::asio::error::operation_aborted) {
+          BOOST_LOG(info) << "Mic socket normally closed";
+          return;
+        }
         if (ec != boost::system::errc::connection_refused &&
             ec != boost::system::errc::connection_reset) {
           BOOST_LOG(error) << "Mic socket error: "sv << ec.message();
