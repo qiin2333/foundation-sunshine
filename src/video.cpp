@@ -928,6 +928,10 @@ namespace video {
         { "rc"s, &config::video.amd.amd_rc_av1 },
         { "usage"s, &config::video.amd.amd_usage_av1 },
         { "enforce_hrd"s, &config::video.amd.amd_enforce_hrd },
+        // AV1 optimization options (no latency impact)
+        { "high_motion_quality_boost_enable"s, true },
+        { "pa_paq_mode"s, "caq"s },
+        { "pa_taq_mode"s, 2 },
       },
       {},  // SDR-specific options
       {},  // HDR-specific options
