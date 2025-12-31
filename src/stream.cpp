@@ -1358,7 +1358,7 @@ namespace stream {
         }
         
         // 解密成功且数据看起来有效
-        audio::write_mic_data(plaintext.data(), plaintext.size());
+        audio::write_mic_data(plaintext.data(), plaintext.size(), sequence_number);
         return;
       }
       
@@ -1369,7 +1369,7 @@ namespace stream {
       }
       
       // 未加密数据或加密未启用，直接处理
-      audio::write_mic_data(audio_data, data_size);
+      audio::write_mic_data(audio_data, data_size, sequence_number);
     };
 
     std::function<void(const boost::system::error_code, size_t)> mic_recv_func;
