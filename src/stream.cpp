@@ -1448,8 +1448,11 @@ namespace stream {
 
     BOOST_LOG(debug) << "Starting microphone receive thread";
 
+    auto retry_delay = 300ms;  // 初始重试延迟，指数退避到最大5秒
+
     while (!broadcast_shutdown_event->peek()) {
       if (!ctx.mic_socket_enabled.load()) {
+        retry_delay = 300ms;  // 会话结束时重置延迟
         std::this_thread::sleep_for(100ms);
         continue;
       }
@@ -1457,8 +1460,9 @@ namespace stream {
       // 延迟初始化麦克风设备
       if (!mic_device_initialized) {
         if (audio::init_mic_redirect_device() != 0) {
-          BOOST_LOG(warning) << "Failed to initialize mic redirect device";
-          break;  // 初始化失败，退出线程
+          std::this_thread::sleep_for(retry_delay);
+          retry_delay = std::min(retry_delay * 2, 5000ms);  // 指数退避，最大5秒
+          continue;
         }
         mic_device_initialized = true;
       }
