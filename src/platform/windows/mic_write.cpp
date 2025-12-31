@@ -126,6 +126,12 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::init() {
+    // Check if microphone streaming is enabled in config
+    if (!config::audio.stream_mic) {
+      BOOST_LOG(info) << "Microphone streaming is disabled by config";
+      return -1;
+    }
+
     // 初始化OPUS解码器
     int opus_error;
     opus_decoder = opus_decoder_create(48000, 1, &opus_error);  // 48kHz, 单声道
@@ -144,6 +150,7 @@ namespace platf::audio {
 
     if (FAILED(hr)) {
       BOOST_LOG(error) << "Couldn't create Device Enumerator for mic write: [0x" << util::hex(hr).to_string_view() << "]";
+      cleanup();
       return -1;
     }
 
@@ -152,7 +159,7 @@ namespace platf::audio {
 
     // 尝试创建或使用虚拟音频设备
     if (create_virtual_audio_device() != 0) {
-      BOOST_LOG(warning) << "Virtual audio device not available, will try to use existing devices";
+      BOOST_LOG(warning) << "Virtual audio device not available, microphone redirection may not work";
     }
 
     // 设置loopback
@@ -181,6 +188,7 @@ namespace platf::audio {
 
     if (FAILED(hr) || !device) {
       BOOST_LOG(error) << "No suitable audio output device available for client mic redirection";
+      cleanup();
       return -1;
     }
 
@@ -198,6 +206,7 @@ namespace platf::audio {
       device->GetId(&device_id);
       BOOST_LOG(error) << "Device ID: " << platf::to_utf8(device_id.get());
 
+      cleanup();
       return -1;
     }
 
@@ -241,6 +250,7 @@ namespace platf::audio {
 
     if (FAILED(init_status)) {
       BOOST_LOG(error) << "Failed to initialize IAudioClient with any supported format: [0x" << util::hex(init_status).to_string_view() << "]";
+      cleanup();
       return -1;
     }
 
@@ -251,6 +261,7 @@ namespace platf::audio {
     status = audio_client->Start();
     if (FAILED(status)) {
       BOOST_LOG(error) << "Failed to start IAudioClient for mic write: [0x" << util::hex(status).to_string_view() << "]";
+      cleanup();
       return -1;
     }
 
@@ -259,6 +270,7 @@ namespace platf::audio {
     if (FAILED(status) || !audio_render) {
       BOOST_LOG(error) << "Failed to get IAudioRenderClient for mic write: [0x" << util::hex(status).to_string_view() << "]";
       audio_client->Stop();
+      cleanup();
       return -1;
     }
 
@@ -277,7 +289,7 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::write_data(const char *data, size_t len) {
-    if (!audio_client || !audio_render) {
+    if (!audio_client || !audio_render || !opus_decoder) {
       BOOST_LOG(error) << "Mic write device not initialized";
       return -1;
     }
@@ -334,11 +346,19 @@ namespace platf::audio {
     UINT32 padding = 0;
     auto status = audio_client->GetBufferSize(&bufferFrameCount);
     if (FAILED(status)) {
+      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
+        BOOST_LOG(warning) << "Audio device invalidated during mic write (GetBufferSize)";
+        return -2;  // Special return value indicating device invalidated
+      }
       BOOST_LOG(error) << "Failed to get buffer size for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
     status = audio_client->GetCurrentPadding(&padding);
     if (FAILED(status)) {
+      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
+        BOOST_LOG(warning) << "Audio device invalidated during mic write (GetCurrentPadding)";
+        return -2;  // Special return value indicating device invalidated
+      }
       BOOST_LOG(error) << "Failed to get current padding for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
@@ -361,6 +381,10 @@ namespace platf::audio {
       // 重新检查可用空间
       status = audio_client->GetCurrentPadding(&padding);
       if (FAILED(status)) {
+        if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
+          BOOST_LOG(warning) << "Audio device invalidated during mic write (GetCurrentPadding after wait)";
+          return -2;  // Special return value indicating device invalidated
+        }
         BOOST_LOG(error) << "Failed to get current padding after wait: [0x" << util::hex(status).to_string_view() << "]";
         return -1;
       }
@@ -386,6 +410,10 @@ namespace platf::audio {
     BYTE *pData = nullptr;
     status = audio_render->GetBuffer(framesToWrite, &pData);
     if (FAILED(status)) {
+      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
+        BOOST_LOG(warning) << "Audio device invalidated during mic write (GetBuffer)";
+        return -2;  // Special return value indicating device invalidated
+      }
       BOOST_LOG(error) << "Failed to get render buffer for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
@@ -396,6 +424,10 @@ namespace platf::audio {
     // 释放缓冲区
     status = audio_render->ReleaseBuffer(framesToWrite, 0);
     if (FAILED(status)) {
+      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
+        BOOST_LOG(warning) << "Audio device invalidated during mic write (ReleaseBuffer)";
+        return -2;  // Special return value indicating device invalidated
+      }
       BOOST_LOG(error) << "Failed to release render buffer for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
@@ -405,7 +437,7 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::test_write() {
-    if (!audio_client || !audio_render) {
+    if (!audio_client || !audio_render || !opus_decoder) {
       BOOST_LOG(error) << "Mic write device not initialized for test";
       return -1;
     }
@@ -432,7 +464,7 @@ namespace platf::audio {
       return 0;  // 设备已存在
     }
 
-    BOOST_LOG(info) << "Attempting to install VB-Cable automatically";
+    BOOST_LOG(debug) << "VB-Cable not found, attempting to download...";
 
     // 检查是否已安装VB-Cable驱动程序
     HKEY hKey;
@@ -442,8 +474,8 @@ namespace platf::audio {
       return -1;  // 已安装但未找到设备，可能是未启用
     }
 
-    // 自动为用户安装VB-Cable
-    BOOST_LOG(info) << "Downloading VB-Cable installer...";
+    // 下载VB-Cable
+    BOOST_LOG(debug) << "Downloading VB-Cable...";
 
     // 下载VB-Cable安装程序
     std::wstring download_url = L"https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip";
@@ -451,44 +483,45 @@ namespace platf::audio {
 
     HMODULE urlmon = LoadLibraryW(L"urlmon.dll");
     if (!urlmon) {
-      BOOST_LOG(error) << "Failed to load urlmon.dll";
+      BOOST_LOG(warning) << "VB-Cable is required for microphone streaming. Please download from: https://vb-audio.com/Cable/";
       return -1;
     }
 
     auto URLDownloadToFileW_ptr = (decltype(URLDownloadToFileW) *) GetProcAddress(urlmon, "URLDownloadToFileW");
     if (!URLDownloadToFileW_ptr || URLDownloadToFileW_ptr(nullptr, download_url.c_str(), temp_path.c_str(), 0, nullptr) != S_OK) {
-      BOOST_LOG(error) << "Failed to download VB-Cable installer";
+      BOOST_LOG(warning) << "Failed to download VB-Cable. Please download manually from: https://vb-audio.com/Cable/";
       FreeLibrary(urlmon);
       return -1;
     }
     FreeLibrary(urlmon);
 
-    BOOST_LOG(info) << "Extracting VB-Cable installer...";
-
-    // 解压安装包
+    // 解压安装包到用户可访问的位置
     std::wstring extract_path = std::filesystem::temp_directory_path().wstring() + L"\\VBCABLE_Install";
-    if (!std::filesystem::create_directory(extract_path)) {
-      BOOST_LOG(error) << "Failed to create extraction directory";
+    std::error_code ec;
+    std::filesystem::create_directories(extract_path, ec);
+    if (ec && ec != std::errc::file_exists) {
+      BOOST_LOG(error) << "Failed to create extraction directory: " << ec.message();
       return -1;
     }
 
-    // 执行安装程序
-    BOOST_LOG(info) << "Installing VB-Cable...";
-    std::wstring install_cmd = L"powershell -command \"Expand-Archive -Path '" + temp_path + L"' -DestinationPath '" + extract_path + L"'; Start-Process -FilePath '" + extract_path + L"\\VBCABLE_Setup_x64.exe' -ArgumentList '/S' -Wait\"";
+    // 解压VB-Cable
+    BOOST_LOG(debug) << "Extracting VB-Cable...";
+    std::wstring extract_cmd = L"powershell -command \"Expand-Archive -Path '" + temp_path + L"' -DestinationPath '" + extract_path + L"' -Force\"";
 
-    if (_wsystem(install_cmd.c_str()) != 0) {
-      BOOST_LOG(error) << "Failed to install VB-Cable";
+    if (_wsystem(extract_cmd.c_str()) != 0) {
+      BOOST_LOG(error) << "Failed to extract VB-Cable installer";
       return -1;
     }
 
-    BOOST_LOG(info) << "VB-Cable installed successfully";
+    // 引导用户手动安装
+    BOOST_LOG(warning) << "VB-Cable downloaded to: " << platf::to_utf8(extract_path) << " ; Please run 'VBCABLE_Setup_x64.exe' as administrator to install, then restart Sunshine";
 
-    return 0;
+    return -1;
   }
 
   std::optional<matched_field_t>
   mic_write_wasapi_t::find_device_id(const match_fields_list_t &match_list) {
-    if (match_list.empty()) {
+    if (match_list.empty() || !device_enum) {
       return std::nullopt;
     }
 
@@ -504,7 +537,7 @@ namespace platf::audio {
 
   std::optional<matched_field_t>
   mic_write_wasapi_t::find_capture_device_id(const match_fields_list_t &match_list) {
-    if (match_list.empty()) {
+    if (match_list.empty() || !device_enum) {
       return std::nullopt;
     }
 
@@ -732,6 +765,11 @@ namespace platf::audio {
   void
   mic_write_wasapi_t::store_original_audio_settings() {
     if (restoration_state.settings_stored) {
+      return;
+    }
+
+    if (!device_enum) {
+      BOOST_LOG(warning) << "Device enumerator not available, skipping audio settings storage";
       return;
     }
 

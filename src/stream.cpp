@@ -1448,6 +1448,8 @@ namespace stream {
 
     BOOST_LOG(debug) << "Starting microphone receive thread";
 
+    bool mic_init_failed = false;  // Track if init failed to avoid infinite retry
+
     while (!broadcast_shutdown_event->peek()) {
       if (!ctx.mic_socket_enabled.load()) {
         std::this_thread::sleep_for(100ms);
@@ -1455,12 +1457,19 @@ namespace stream {
       }
 
       // 延迟初始化麦克风设备
-      if (!mic_device_initialized) {
+      if (!mic_device_initialized && !mic_init_failed) {
         if (audio::init_mic_redirect_device() != 0) {
-          std::this_thread::sleep_for(100ms);
+          BOOST_LOG(debug) << "Microphone redirect device init failed, disabling mic receive";
+          mic_init_failed = true;  // Don't retry - either disabled by config or failed
           continue;
         }
         mic_device_initialized = true;
+      }
+
+      // If mic init failed, just wait for shutdown
+      if (mic_init_failed) {
+        std::this_thread::sleep_for(500ms);
+        continue;
       }
 
       ctx.mic_sock.async_receive_from(asio::buffer(mic_recv_buffer), peer, 0, mic_recv_func);
