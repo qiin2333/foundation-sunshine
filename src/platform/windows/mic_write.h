@@ -201,6 +201,11 @@ namespace platf::audio {
     // FEC recovery state
     uint16_t last_seq = 0;
     bool first_packet = true;
+    
+    // Statistics
+    uint64_t total_packets = 0;
+    uint64_t packet_loss_count = 0;
+    uint64_t fec_recovered_packets = 0;
   };
 
   extern std::unique_ptr<mic_write_wasapi_t> mic_redirect_device;

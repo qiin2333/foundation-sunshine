@@ -126,6 +126,12 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::init() {
+    last_seq = 0;
+    first_packet = true;
+    total_packets = 0;
+    packet_loss_count = 0;
+    fec_recovered_packets = 0;
+
     // 初始化OPUS解码器
     int opus_error;
     opus_decoder = opus_decoder_create(48000, 1, &opus_error);  // 48kHz, 单声道
@@ -284,13 +290,16 @@ namespace platf::audio {
 
     std::vector<int16_t> pcm_mono_buffer;
 
+    ++total_packets;
+
     // FEC recovery: check for packet loss using sequence number
     if (seq != 0 && !first_packet) {
       uint16_t expected_seq = last_seq + 1;
       if (seq != expected_seq && seq > expected_seq) {
         // Packet loss detected, try to recover using FEC from current packet
         uint16_t lost_count = seq - expected_seq;
-        BOOST_LOG(debug) << "Mic packet loss detected: expected " << expected_seq << ", got " << seq << " (lost " << lost_count << ")";
+        packet_loss_count += lost_count;
+        BOOST_LOG(verbose) << "Mic packet loss detected: expected " << expected_seq << ", got " << seq << " (lost " << lost_count << ")";
         
         // Use FEC to recover the previous lost packet from current packet's redundancy data
         // FEC can only recover one packet (the immediately preceding one)
@@ -307,7 +316,8 @@ namespace platf::audio {
               1  // FEC recovery mode
             );
             if (fec_samples > 0) {
-              BOOST_LOG(debug) << "FEC recovered " << fec_samples << " samples for lost packet";
+              BOOST_LOG(verbose) << "FEC recovered " << fec_samples << " samples for lost packet";
+              ++fec_recovered_packets;
               // Write recovered audio (will be done together with current packet below)
               pcm_mono_buffer = std::move(fec_buffer);
             }
@@ -804,6 +814,14 @@ namespace platf::audio {
     }
 
     BOOST_LOG(info) << "Restoring audio devices to original state";
+
+    // Log FEC statistics
+    if (total_packets > 0) {
+      double loss_rate = (double)packet_loss_count / (total_packets + packet_loss_count) * 100.0;
+      BOOST_LOG(info) << "Microphone Audio Stats, Total Audio Packets: " << total_packets
+                      << ", Packet Loss: " << packet_loss_count << " (" << std::fixed << std::setprecision(1) << loss_rate << "%)"
+                      << ", FEC Recovered: " << fec_recovered_packets;
+    }
 
     int result = 0;
 
