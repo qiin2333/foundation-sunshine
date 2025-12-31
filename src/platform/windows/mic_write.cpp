@@ -126,12 +126,6 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::init() {
-    // Check if microphone streaming is enabled in config
-    if (!config::audio.stream_mic) {
-      BOOST_LOG(info) << "Microphone streaming is disabled by config";
-      return -1;
-    }
-
     // 初始化OPUS解码器
     int opus_error;
     opus_decoder = opus_decoder_create(48000, 1, &opus_error);  // 48kHz, 单声道
@@ -474,6 +468,15 @@ namespace platf::audio {
       return -1;  // 已安装但未找到设备，可能是未启用
     }
 
+    // 检查是否已经下载并解压过（防止重复下载）
+    std::wstring extract_path = std::filesystem::temp_directory_path().wstring() + L"\\VBCABLE_Install";
+    std::wstring installer_path = extract_path + L"\\VBCABLE_Setup_x64.exe";
+    if (std::filesystem::exists(installer_path)) {
+      // 安装程序已存在，只需提示用户安装
+      BOOST_LOG(warning) << "VB-Cable already downloaded to: " << platf::to_utf8(extract_path) << " ; Please run 'VBCABLE_Setup_x64.exe' as administrator to install, then restart Sunshine";
+      return -1;
+    }
+
     // 下载VB-Cable
     BOOST_LOG(debug) << "Downloading VB-Cable...";
 
@@ -496,7 +499,6 @@ namespace platf::audio {
     FreeLibrary(urlmon);
 
     // 解压安装包到用户可访问的位置
-    std::wstring extract_path = std::filesystem::temp_directory_path().wstring() + L"\\VBCABLE_Install";
     std::error_code ec;
     std::filesystem::create_directories(extract_path, ec);
     if (ec && ec != std::errc::file_exists) {

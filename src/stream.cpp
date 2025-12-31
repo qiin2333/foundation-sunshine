@@ -1448,8 +1448,6 @@ namespace stream {
 
     BOOST_LOG(debug) << "Starting microphone receive thread";
 
-    bool mic_init_failed = false;  // Track if init failed to avoid infinite retry
-
     while (!broadcast_shutdown_event->peek()) {
       if (!ctx.mic_socket_enabled.load()) {
         std::this_thread::sleep_for(100ms);
@@ -1457,19 +1455,12 @@ namespace stream {
       }
 
       // 延迟初始化麦克风设备
-      if (!mic_device_initialized && !mic_init_failed) {
+      if (!mic_device_initialized) {
         if (audio::init_mic_redirect_device() != 0) {
-          BOOST_LOG(debug) << "Microphone redirect device init failed, disabling mic receive";
-          mic_init_failed = true;  // Don't retry - either disabled by config or failed
-          continue;
+          BOOST_LOG(warning) << "Failed to initialize mic redirect device";
+          break;  // 初始化失败，退出线程
         }
         mic_device_initialized = true;
-      }
-
-      // If mic init failed, just wait for shutdown
-      if (mic_init_failed) {
-        std::this_thread::sleep_for(500ms);
-        continue;
       }
 
       ctx.mic_sock.async_receive_from(asio::buffer(mic_recv_buffer), peer, 0, mic_recv_func);
@@ -2139,19 +2130,23 @@ namespace stream {
       return -1;
     }
 
-    // 总是启动麦克风socket，后续根据会话需要决定是否关闭
-    ctx.mic_sock.open(protocol, ec);
-    if (ec) {
-      BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
-      return -1;
+    // 仅在启用麦克风串流时启动麦克风socket
+    if (config::audio.stream_mic) {
+      ctx.mic_sock.open(protocol, ec);
+      if (ec) {
+        BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
+        return -1;
+      }
+      ctx.mic_sock.bind(udp::endpoint(protocol, mic_port), ec);
+      if (ec) {
+        BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << mic_port << "]: "sv << ec.message();
+        return -1;
+      }
+      ctx.mic_socket_enabled.store(true);
+      BOOST_LOG(info) << "Microphone socket started on port " << mic_port;
+    } else {
+      BOOST_LOG(info) << "Microphone streaming disabled by config";
     }
-    ctx.mic_sock.bind(udp::endpoint(protocol, mic_port), ec);
-    if (ec) {
-      BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << mic_port << "]: "sv << ec.message();
-      return -1;
-    }
-    ctx.mic_socket_enabled.store(true);
-    BOOST_LOG(info) << "Microphone socket started on port " << mic_port;
 
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
