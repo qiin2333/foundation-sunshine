@@ -1308,7 +1308,11 @@ namespace stream {
       // 根据 RTSP 协商的配置判断是否启用加密
       // 不依赖数据长度猜测，直接使用会话配置作为权威来源
       bool is_encrypted = ctx.mic_encryption_enabled.load();
-      
+
+      // 更新统计
+      auto &stats = client_stats[peer_addr];
+      stats.total_packets++;
+
       if (is_encrypted && ctx.mic_cipher.has_value()) {
         std::lock_guard<std::mutex> lg(ctx.mic_cipher_mutex);
         // 根据 sequenceNumber 更新 IV
@@ -1322,9 +1326,6 @@ namespace stream {
         *(std::uint32_t *) current_iv.data() = util::endian::big<std::uint32_t>(ivSeq);
         // 确保后 12 字节为 0（客户端构建 IV 时后 12 字节也是 0）
         std::memset(current_iv.data() + 4, 0, 12);
-        // 更新统计
-        auto &stats = client_stats[peer_addr];
-        stats.total_packets++;
         std::vector<std::uint8_t> plaintext;
         std::string_view cipher_view((const char *) audio_data, data_size);
         if (ctx.mic_cipher->decrypt(cipher_view, plaintext, &current_iv) != 0) {
@@ -1361,14 +1362,17 @@ namespace stream {
         audio::write_mic_data(plaintext.data(), plaintext.size(), sequence_number);
         return;
       }
-      
+
       // 安全模式：拒绝明文数据
       if (ctx.mic_reject_plaintext.load()) {
         BOOST_LOG(warning) << "Rejected plaintext microphone data (mic_reject_plaintext enabled)";
+        stats.decrypt_failed++;
         return;
       }
       
       // 未加密数据或加密未启用，直接处理
+      // 也要统计未加密数据
+      stats.decrypt_success++;  // 明文数据算作"成功"
       audio::write_mic_data(audio_data, data_size, sequence_number);
     };
 
@@ -1436,11 +1440,11 @@ namespace stream {
           uint16_t sequence_number = util::endian::little(header->rtp.sequenceNumber);
           size_t data_size = received_bytes - header_size;
           
-          BOOST_LOG(verbose) << "Received MIC packet: total=" << received_bytes 
-                          << " bytes, header=" << header_size 
-                          << " bytes, data=" << data_size 
-                          << " bytes, sequenceNumber=" << sequence_number << " (little-endian)"
-                          << " from " << client_id;
+         // BOOST_LOG(verbose) << "Received MIC packet: total=" << received_bytes 
+          //                 << " bytes, header=" << header_size 
+          //                 << " bytes, data=" << data_size 
+          //                 << " bytes, sequenceNumber=" << sequence_number << " (little-endian)"
+          //                 << " from " << client_id;
           process_audio_data(reinterpret_cast<const uint8_t *>(mic_recv_buffer.data()) + header_size, data_size, sequence_number, client_id);
         }
       }
