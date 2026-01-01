@@ -295,7 +295,12 @@ namespace system_tray {
     auto show_file_dialog = [&]() {
       // 初始化COM
       HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-      bool com_initialized = SUCCEEDED(hr);
+      bool com_initialized = (hr == S_OK);  // 只有成功初始化时才需要清理
+      
+      if (FAILED(hr) && hr != RPC_E_CHANGED_MODE && hr != S_FALSE) {
+        BOOST_LOG(error) << "COM initialization failed: 0x" << std::hex << hr << std::dec;
+        return;
+      }
 
       IFileOpenDialog *pFileOpen = NULL;
 
@@ -315,16 +320,10 @@ namespace system_tray {
         std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_SELECT_IMPORT));
         pFileOpen->SetTitle(dialog_title.c_str());
 
-        // 设置选项：禁用所有可能导致访问系统位置的功能
+        // 设置对话框选项
         DWORD dwFlags;
         pFileOpen->GetOptions(&dwFlags);
-        // FOS_FORCEFILESYSTEM: 强制只使用文件系统
-        // FOS_DONTADDTORECENT: 不添加到最近文件列表
-        // FOS_NOCHANGEDIR: 不改变当前工作目录
-        // FOS_HIDEPINNEDPLACES: 隐藏固定的位置（导航面板中的快速访问等）
-        // FOS_NOVALIDATE: 不验证文件路径（避免访问不存在的系统路径）
-        pFileOpen->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT |
-                              FOS_NOCHANGEDIR | FOS_HIDEPINNEDPLACES | FOS_NOVALIDATE);
+        pFileOpen->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST);
 
         // 显示对话框
         hr = pFileOpen->Show(NULL);
@@ -343,7 +342,13 @@ namespace system_tray {
             pItem->Release();
           }
         }
+        else if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+          BOOST_LOG(warning) << "[tray] Import config file dialog failed: 0x" << std::hex << hr << std::dec;
+        }
         pFileOpen->Release();
+      }
+      else {
+        BOOST_LOG(error) << "[tray] Import config file dialog failed to create file dialog: 0x" << std::hex << hr << std::dec;
       }
 
       if (com_initialized) {
@@ -433,7 +438,12 @@ namespace system_tray {
     auto show_file_dialog = [&]() {
       // 初始化COM
       HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-      bool com_initialized = SUCCEEDED(hr);
+      bool com_initialized = (hr == S_OK);  // 只有成功初始化时才需要清理
+      
+      if (FAILED(hr) && hr != RPC_E_CHANGED_MODE && hr != S_FALSE) {
+        BOOST_LOG(error) << "COM initialization failed: 0x" << std::hex << hr << std::dec;
+        return;
+      }
 
       IFileSaveDialog *pFileSave = NULL;
 
@@ -459,11 +469,10 @@ namespace system_tray {
         std::wstring wdefault_name(default_name.begin(), default_name.end());
         pFileSave->SetFileName(wdefault_name.c_str());
 
-        // 设置选项：禁用所有可能导致访问系统位置的功能
+        // 设置对话框选项
         DWORD dwFlags;
         pFileSave->GetOptions(&dwFlags);
-        pFileSave->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT |
-                              FOS_NOCHANGEDIR | FOS_HIDEPINNEDPLACES | FOS_NOVALIDATE);
+        pFileSave->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT);
 
         // 显示对话框
         hr = pFileSave->Show(NULL);
@@ -482,7 +491,13 @@ namespace system_tray {
             pItem->Release();
           }
         }
+        else if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+          BOOST_LOG(warning) << "[tray] Export config file dialog failed: 0x" << std::hex << hr << std::dec;
+        }
         pFileSave->Release();
+      }
+      else {
+        BOOST_LOG(error) << "[tray] Export config file dialog failed to create: 0x" << std::hex << hr << std::dec;
       }
 
       if (com_initialized) {
