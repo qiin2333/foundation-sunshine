@@ -1207,7 +1207,7 @@ namespace platf::audio {
     }
 
     int
-    write_mic_data(const char *data, size_t len, uint16_t seq = 0) {
+    write_mic_data(const char *data, size_t len) {
       static std::mutex mic_device_mutex;
       std::lock_guard<std::mutex> lock(mic_device_mutex);
 
@@ -1216,7 +1216,7 @@ namespace platf::audio {
         return -1;
       }
 
-      return mic_redirect_device->write_data(data, len, seq);
+      return mic_redirect_device->write_data(data, len);
     }
   };
 }  // namespace platf::audio

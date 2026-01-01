@@ -129,9 +129,8 @@ namespace audio {
    * @brief Write microphone data to the virtual audio device.
    * @param data Pointer to the audio data.
    * @param size Size of the audio data in bytes.
-   * @param seq Sequence number for FEC recovery (0 = unknown).
    * @returns Number of bytes written, or -1 on error.
    */
   int
-  write_mic_data(const std::uint8_t *data, size_t size, uint16_t seq = 0);
+  write_mic_data(const std::uint8_t *data, size_t size);
 }  // namespace audio
