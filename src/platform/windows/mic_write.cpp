@@ -126,6 +126,12 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::init() {
+    last_seq = 0;
+    first_packet = true;
+    total_packets = 0;
+    packet_loss_count = 0;
+    fec_recovered_packets = 0;
+
     // 初始化OPUS解码器
     int opus_error;
     opus_decoder = opus_decoder_create(48000, 1, &opus_error);  // 48kHz, 单声道
@@ -144,7 +150,6 @@ namespace platf::audio {
 
     if (FAILED(hr)) {
       BOOST_LOG(error) << "Couldn't create Device Enumerator for mic write: [0x" << util::hex(hr).to_string_view() << "]";
-      cleanup();
       return -1;
     }
 
@@ -153,7 +158,7 @@ namespace platf::audio {
 
     // 尝试创建或使用虚拟音频设备
     if (create_virtual_audio_device() != 0) {
-      BOOST_LOG(warning) << "Virtual audio device not available, microphone redirection may not work";
+      BOOST_LOG(warning) << "Virtual audio device not available, will try to use existing devices";
     }
 
     // 设置loopback
@@ -182,7 +187,6 @@ namespace platf::audio {
 
     if (FAILED(hr) || !device) {
       BOOST_LOG(error) << "No suitable audio output device available for client mic redirection";
-      cleanup();
       return -1;
     }
 
@@ -200,7 +204,6 @@ namespace platf::audio {
       device->GetId(&device_id);
       BOOST_LOG(error) << "Device ID: " << platf::to_utf8(device_id.get());
 
-      cleanup();
       return -1;
     }
 
@@ -244,7 +247,6 @@ namespace platf::audio {
 
     if (FAILED(init_status)) {
       BOOST_LOG(error) << "Failed to initialize IAudioClient with any supported format: [0x" << util::hex(init_status).to_string_view() << "]";
-      cleanup();
       return -1;
     }
 
@@ -255,7 +257,6 @@ namespace platf::audio {
     status = audio_client->Start();
     if (FAILED(status)) {
       BOOST_LOG(error) << "Failed to start IAudioClient for mic write: [0x" << util::hex(status).to_string_view() << "]";
-      cleanup();
       return -1;
     }
 
@@ -264,7 +265,6 @@ namespace platf::audio {
     if (FAILED(status) || !audio_render) {
       BOOST_LOG(error) << "Failed to get IAudioRenderClient for mic write: [0x" << util::hex(status).to_string_view() << "]";
       audio_client->Stop();
-      cleanup();
       return -1;
     }
 
@@ -282,10 +282,54 @@ namespace platf::audio {
   }
 
   int
-  mic_write_wasapi_t::write_data(const char *data, size_t len) {
+  mic_write_wasapi_t::write_data(const char *data, size_t len, uint16_t seq) {
     if (!audio_client || !audio_render || !opus_decoder) {
       BOOST_LOG(error) << "Mic write device not initialized";
       return -1;
+    }
+
+    std::vector<int16_t> pcm_mono_buffer;
+
+    ++total_packets;
+
+    // FEC recovery: check for packet loss using sequence number
+    if (seq != 0 && !first_packet) {
+      uint16_t expected_seq = last_seq + 1;
+      if (seq != expected_seq && seq > expected_seq) {
+        // Packet loss detected, try to recover using FEC from current packet
+        uint16_t lost_count = seq - expected_seq;
+        packet_loss_count += lost_count;
+        BOOST_LOG(verbose) << "Mic packet loss detected: expected " << expected_seq << ", got " << seq << " (lost " << lost_count << ")";
+        
+        // Use FEC to recover the previous lost packet from current packet's redundancy data
+        // FEC can only recover one packet (the immediately preceding one)
+        if (lost_count == 1) {
+          int fec_frame_size = opus_decoder_get_nb_samples(opus_decoder, (const unsigned char *) data, len);
+          if (fec_frame_size > 0) {
+            std::vector<int16_t> fec_buffer(fec_frame_size);
+            int fec_samples = opus_decode(
+              opus_decoder,
+              (const unsigned char *) data,
+              len,
+              fec_buffer.data(),
+              fec_frame_size,
+              1  // FEC recovery mode
+            );
+            if (fec_samples > 0) {
+              BOOST_LOG(verbose) << "FEC recovered " << fec_samples << " samples for lost packet";
+              ++fec_recovered_packets;
+              // Write recovered audio (will be done together with current packet below)
+              pcm_mono_buffer = std::move(fec_buffer);
+            }
+          }
+        }
+      }
+    }
+
+    // Update sequence tracking
+    if (seq != 0) {
+      last_seq = seq;
+      first_packet = false;
     }
 
     // 解码OPUS数据
@@ -295,16 +339,17 @@ namespace platf::audio {
       return -1;
     }
 
-    std::vector<int16_t> pcm_mono_buffer;
-    pcm_mono_buffer.resize(frame_size);  // Resize to exactly fit the decoded mono samples
+    // If we recovered FEC data, append current frame; otherwise just decode current
+    size_t fec_offset = pcm_mono_buffer.size();
+    pcm_mono_buffer.resize(fec_offset + frame_size);
 
     int samples_decoded = opus_decode(
       opus_decoder,
       (const unsigned char *) data,
       len,
-      pcm_mono_buffer.data(),
+      pcm_mono_buffer.data() + fec_offset,
       frame_size,
-      0  // No FEC
+      0  // Normal decode
     );
 
     if (samples_decoded < 0) {
@@ -340,19 +385,11 @@ namespace platf::audio {
     UINT32 padding = 0;
     auto status = audio_client->GetBufferSize(&bufferFrameCount);
     if (FAILED(status)) {
-      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-        BOOST_LOG(warning) << "Audio device invalidated during mic write (GetBufferSize)";
-        return -2;  // Special return value indicating device invalidated
-      }
       BOOST_LOG(error) << "Failed to get buffer size for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
     status = audio_client->GetCurrentPadding(&padding);
     if (FAILED(status)) {
-      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-        BOOST_LOG(warning) << "Audio device invalidated during mic write (GetCurrentPadding)";
-        return -2;  // Special return value indicating device invalidated
-      }
       BOOST_LOG(error) << "Failed to get current padding for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
@@ -365,43 +402,29 @@ namespace platf::audio {
 
     UINT32 availableFrames = bufferFrameCount - padding;
 
-    // 如果缓冲区空间不足，进行多次等待尝试
+    // 等待缓冲区有足够空间
     if (framesToWrite > availableFrames) {
       BOOST_LOG(debug) << "Buffer full, waiting for space. Need: " << framesToWrite << ", Available: " << availableFrames;
 
-      // 最多尝试3次，每次等待时间递增
-      const int max_retries = 3;
-      for (int retry = 0; retry < max_retries && framesToWrite > availableFrames; ++retry) {
-        // 根据需要的帧数计算等待时间：帧数 / 48000 * 1000 (ms)
-        // 保守估计，等待所需时间的 80%
-        DWORD wait_ms = static_cast<DWORD>((framesToWrite - availableFrames) * 1000 / 48000 * 0.8);
-        wait_ms = std::max(wait_ms, 5ul);  // 最少等待 5ms
-        wait_ms = std::min(wait_ms, 50ul); // 最多等待 50ms
-        
-        Sleep(wait_ms);
+      // 等待一段时间让缓冲区清空
+      Sleep(10);  // 等待10ms
 
-        // 重新检查可用空间
-        status = audio_client->GetCurrentPadding(&padding);
-        if (FAILED(status)) {
-          BOOST_LOG(error) << "Failed to get current padding after wait: [0x" << util::hex(status).to_string_view() << "]";
-          return -1;
-        }
-
-        if (padding > bufferFrameCount) {
-          padding = 0;
-        }
-
-        availableFrames = bufferFrameCount - padding;
-        
-        if (framesToWrite <= availableFrames) {
-          BOOST_LOG(verbose) << "Buffer space available after " << (retry + 1) << " retries";
-          break;
-        }
+      // 重新检查可用空间
+      status = audio_client->GetCurrentPadding(&padding);
+      if (FAILED(status)) {
+        BOOST_LOG(error) << "Failed to get current padding after wait: [0x" << util::hex(status).to_string_view() << "]";
+        return -1;
       }
 
-      // 如果仍然没有足够空间，降级为 debug 日志并截断
+      if (padding > bufferFrameCount) {
+        padding = 0;
+      }
+
+      availableFrames = bufferFrameCount - padding;
+
+      // 如果仍然没有足够空间，则截断数据
       if (framesToWrite > availableFrames) {
-        BOOST_LOG(warning) << "Mic write buffer still full after retries: " << framesToWrite << " frames requested, " << availableFrames << " available. Truncating.";
+        BOOST_LOG(warning) << "Mic write buffer overflow after wait: " << framesToWrite << " frames to write, but only " << availableFrames << " available.";
         framesToWrite = availableFrames;
       }
     }
@@ -414,10 +437,6 @@ namespace platf::audio {
     BYTE *pData = nullptr;
     status = audio_render->GetBuffer(framesToWrite, &pData);
     if (FAILED(status)) {
-      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-        BOOST_LOG(warning) << "Audio device invalidated during mic write (GetBuffer)";
-        return -2;  // Special return value indicating device invalidated
-      }
       BOOST_LOG(error) << "Failed to get render buffer for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
@@ -428,10 +447,6 @@ namespace platf::audio {
     // 释放缓冲区
     status = audio_render->ReleaseBuffer(framesToWrite, 0);
     if (FAILED(status)) {
-      if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-        BOOST_LOG(warning) << "Audio device invalidated during mic write (ReleaseBuffer)";
-        return -2;  // Special return value indicating device invalidated
-      }
       BOOST_LOG(error) << "Failed to release render buffer for mic write: [0x" << util::hex(status).to_string_view() << "]";
       return -1;
     }
@@ -441,7 +456,7 @@ namespace platf::audio {
 
   int
   mic_write_wasapi_t::test_write() {
-    if (!audio_client || !audio_render || !opus_decoder) {
+    if (!audio_client || !audio_render) {
       BOOST_LOG(error) << "Mic write device not initialized for test";
       return -1;
     }
@@ -468,7 +483,7 @@ namespace platf::audio {
       return 0;  // 设备已存在
     }
 
-    BOOST_LOG(debug) << "VB-Cable not found, attempting to download...";
+    BOOST_LOG(info) << "Attempting to install VB-Cable automatically";
 
     // 检查是否已安装VB-Cable驱动程序
     HKEY hKey;
@@ -478,17 +493,8 @@ namespace platf::audio {
       return -1;  // 已安装但未找到设备，可能是未启用
     }
 
-    // 检查是否已经下载并解压过（防止重复下载）
-    std::wstring extract_path = std::filesystem::temp_directory_path().wstring() + L"\\VBCABLE_Install";
-    std::wstring installer_path = extract_path + L"\\VBCABLE_Setup_x64.exe";
-    if (std::filesystem::exists(installer_path)) {
-      // 安装程序已存在，只需提示用户安装
-      BOOST_LOG(warning) << "VB-Cable already downloaded to: " << platf::to_utf8(extract_path) << " ; Please run 'VBCABLE_Setup_x64.exe' as administrator to install, then restart Sunshine";
-      return -1;
-    }
-
-    // 下载VB-Cable
-    BOOST_LOG(debug) << "Downloading VB-Cable...";
+    // 自动为用户安装VB-Cable
+    BOOST_LOG(info) << "Downloading VB-Cable installer...";
 
     // 下载VB-Cable安装程序
     std::wstring download_url = L"https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip";
@@ -496,44 +502,44 @@ namespace platf::audio {
 
     HMODULE urlmon = LoadLibraryW(L"urlmon.dll");
     if (!urlmon) {
-      BOOST_LOG(warning) << "VB-Cable is required for microphone streaming. Please download from: https://vb-audio.com/Cable/";
+      BOOST_LOG(error) << "Failed to load urlmon.dll";
       return -1;
     }
 
     auto URLDownloadToFileW_ptr = (decltype(URLDownloadToFileW) *) GetProcAddress(urlmon, "URLDownloadToFileW");
     if (!URLDownloadToFileW_ptr || URLDownloadToFileW_ptr(nullptr, download_url.c_str(), temp_path.c_str(), 0, nullptr) != S_OK) {
-      BOOST_LOG(warning) << "Failed to download VB-Cable. Please download manually from: https://vb-audio.com/Cable/";
+      BOOST_LOG(error) << "Failed to download VB-Cable installer";
       FreeLibrary(urlmon);
       return -1;
     }
     FreeLibrary(urlmon);
 
-    // 解压安装包到用户可访问的位置
-    std::error_code ec;
-    std::filesystem::create_directories(extract_path, ec);
-    if (ec && ec != std::errc::file_exists) {
-      BOOST_LOG(error) << "Failed to create extraction directory: " << ec.message();
+    BOOST_LOG(info) << "Extracting VB-Cable installer...";
+
+    // 解压安装包
+    std::wstring extract_path = std::filesystem::temp_directory_path().wstring() + L"\\VBCABLE_Install";
+    if (!std::filesystem::create_directory(extract_path)) {
+      BOOST_LOG(error) << "Failed to create extraction directory";
       return -1;
     }
 
-    // 解压VB-Cable
-    BOOST_LOG(debug) << "Extracting VB-Cable...";
-    std::wstring extract_cmd = L"powershell -command \"Expand-Archive -Path '" + temp_path + L"' -DestinationPath '" + extract_path + L"' -Force\"";
+    // 执行安装程序
+    BOOST_LOG(info) << "Installing VB-Cable...";
+    std::wstring install_cmd = L"powershell -command \"Expand-Archive -Path '" + temp_path + L"' -DestinationPath '" + extract_path + L"'; Start-Process -FilePath '" + extract_path + L"\\VBCABLE_Setup_x64.exe' -ArgumentList '/S' -Wait\"";
 
-    if (_wsystem(extract_cmd.c_str()) != 0) {
-      BOOST_LOG(error) << "Failed to extract VB-Cable installer";
+    if (_wsystem(install_cmd.c_str()) != 0) {
+      BOOST_LOG(error) << "Failed to install VB-Cable";
       return -1;
     }
 
-    // 引导用户手动安装
-    BOOST_LOG(warning) << "VB-Cable downloaded to: " << platf::to_utf8(extract_path) << " ; Please run 'VBCABLE_Setup_x64.exe' as administrator to install, then restart Sunshine";
+    BOOST_LOG(info) << "VB-Cable installed successfully";
 
-    return -1;
+    return 0;
   }
 
   std::optional<matched_field_t>
   mic_write_wasapi_t::find_device_id(const match_fields_list_t &match_list) {
-    if (match_list.empty() || !device_enum) {
+    if (match_list.empty()) {
       return std::nullopt;
     }
 
@@ -549,7 +555,7 @@ namespace platf::audio {
 
   std::optional<matched_field_t>
   mic_write_wasapi_t::find_capture_device_id(const match_fields_list_t &match_list) {
-    if (match_list.empty() || !device_enum) {
+    if (match_list.empty()) {
       return std::nullopt;
     }
 
@@ -780,11 +786,6 @@ namespace platf::audio {
       return;
     }
 
-    if (!device_enum) {
-      BOOST_LOG(warning) << "Device enumerator not available, skipping audio settings storage";
-      return;
-    }
-
     // 获取并存储当前默认输入设备ID
     device_t default_input;
     if (SUCCEEDED(device_enum->GetDefaultAudioEndpoint(eCapture, eConsole, &default_input)) && default_input) {
@@ -813,6 +814,14 @@ namespace platf::audio {
     }
 
     BOOST_LOG(info) << "Restoring audio devices to original state";
+
+    // Log FEC statistics
+    if (total_packets > 0) {
+      double loss_rate = (double)packet_loss_count / (total_packets + packet_loss_count) * 100.0;
+      BOOST_LOG(info) << "Microphone Audio Stats, Total Audio Packets: " << total_packets
+                      << ", Packet Loss: " << packet_loss_count << " (" << std::fixed << std::setprecision(1) << loss_rate << "%)"
+                      << ", FEC Recovered: " << fec_recovered_packets;
+    }
 
     int result = 0;
 
