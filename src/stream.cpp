@@ -1300,6 +1300,16 @@ namespace stream {
     };
     std::map<std::string, MicStats> client_stats;
 
+    // SSRC验证辅助函数
+    auto validate_mic_ssrc = [](uint32_t ssrc, const std::string &client_id) -> bool {
+      if (ssrc != MIC_PACKET_MAGIC) {
+        BOOST_LOG(warning) << "Client " << client_id << " received invalid microphone packet type (SSRC: 0x" 
+                          << std::hex << ssrc << std::dec << ")";
+        return false;
+      }
+      return true;
+    };
+
     auto process_audio_data = [&](const uint8_t *audio_data, size_t data_size, uint16_t sequence_number, const std::string &peer_addr) {
       if (!ctx.mic_socket_enabled.load()) {
         return;
@@ -1424,6 +1434,10 @@ namespace stream {
           size_t header_size = sizeof(rtp_packet_ext_t);
           if (received_bytes > header_size) {
             uint16_t sequence_number = util::endian::little(header_ext->sequenceNumber);
+            uint32_t ssrc = util::endian::little(header_ext->ssrc);  // 小端序
+            if (!validate_mic_ssrc(ssrc, client_id)) {
+              return;
+            }
             process_audio_data(reinterpret_cast<const uint8_t *>(mic_recv_buffer.data()) + header_size, received_bytes - header_size, sequence_number, client_id);
           }
           return;
@@ -1438,6 +1452,10 @@ namespace stream {
           // 客户端按小端序发送序列号（MicrophoneStream.java 使用 LITTLE_ENDIAN）
           // 服务端必须按小端序读取，否则会读错（比如 1 会读成 256）
           uint16_t sequence_number = util::endian::little(header->rtp.sequenceNumber);
+          uint32_t ssrc = util::endian::little(header->rtp.ssrc);  // 小端序
+          if (!validate_mic_ssrc(ssrc, client_id)) {
+            return;
+          }
           size_t data_size = received_bytes - header_size;
           
          // BOOST_LOG(verbose) << "Received MIC packet: total=" << received_bytes 
@@ -2514,8 +2532,6 @@ namespace stream {
             bool should_enable_mic_encryption = (session.config.encryptionFlagsEnabled & SS_ENC_MIC) != 0;
             if (should_enable_mic_encryption) {
               std::lock_guard<std::mutex> lg(session.broadcast_ref->mic_cipher_mutex);
-              bool cipher_already_exists = session.broadcast_ref->mic_cipher.has_value();
-              BOOST_LOG(info) << "Microphone encryption will be enabled, mic_cipher already exists: " << (cipher_already_exists ? "yes" : "no");
               if (!session.broadcast_ref->mic_cipher) {
                 session.broadcast_ref->mic_cipher.emplace(session.audio.cipher.key, session.audio.cipher.padding);
                 session.broadcast_ref->mic_iv.resize(16);
@@ -2526,27 +2542,11 @@ namespace stream {
                 // 其余字节保持为 0（IV 是 16 字节，但只使用前 4 字节）
                 std::memset(session.broadcast_ref->mic_iv.data() + 4, 0, 12);
                 session.broadcast_ref->mic_encryption_enabled.store(true);
-                
-                // 打印密钥和 IV 的十六进制值用于调试
-                std::string key_hex;
-                for (size_t i = 0; i < session.audio.cipher.key.size(); ++i) {
-                  char buf[4];
-                  std::snprintf(buf, sizeof(buf), "%02x", session.audio.cipher.key[i]);
-                  key_hex += buf;
-                  if (i < session.audio.cipher.key.size() - 1) key_hex += " ";
-                }
-                BOOST_LOG(debug) << "MIC cipher initialized, key (hex): " << key_hex;
-                BOOST_LOG(debug) << "MIC IV initialized with baseIv (avRiKeyId): 0x" << std::hex << session.audio.avRiKeyId << std::dec;
-                BOOST_LOG(info) << "Microphone encryption enabled and initialized, mic_encryption_enabled: " << session.broadcast_ref->mic_encryption_enabled.load();
-              } else {
-                BOOST_LOG(info) << "Microphone encryption cipher already exists, skipping initialization. "
-                  << "Current mic_encryption_enabled state: " 
-                  << session.broadcast_ref->mic_encryption_enabled.load();
               }
+              BOOST_LOG(info) << "Client " << session.client_name << ": Microphone encryption ENABLED";
             } else {
-              BOOST_LOG(info) << "Microphone encryption disabled";
+              BOOST_LOG(info) << "Client " << session.client_name << ": Microphone encryption DISABLED";
             }
-            BOOST_LOG(debug) << "Microphone socket enabled for session";
           }
           else {
             // 如果第一个会话不需要麦克风，关闭麦克风socket
