@@ -1400,16 +1400,16 @@ namespace stream {
         return;
       }
 
-      // 获取客户端标识：优先使用client_name，回退到IP地址
+      // 获取客户端标识：设备名拼接IP地址
       std::string client_ip = peer.address().to_string();
       std::string client_id;
       {
         std::lock_guard<std::mutex> lg(ctx.client_name_mutex);
         auto it = ctx.client_ip_to_name.find(client_ip);
         if (it != ctx.client_ip_to_name.end()) {
-          client_id = it->second;  // 使用client_name
+          client_id = it->second + "@" + client_ip;  // 设备名@IP
         } else {
-          client_id = client_ip;  // 回退到IP
+          client_id = "@" + client_ip;  // 回退到IP（未知设备名时）
         }
       }
 
@@ -1436,7 +1436,7 @@ namespace stream {
           uint16_t sequence_number = util::endian::little(header->rtp.sequenceNumber);
           size_t data_size = received_bytes - header_size;
           
-          BOOST_LOG(debug) << "Received MIC packet: total=" << received_bytes 
+          BOOST_LOG(verbose) << "Received MIC packet: total=" << received_bytes 
                           << " bytes, header=" << header_size 
                           << " bytes, data=" << data_size 
                           << " bytes, sequenceNumber=" << sequence_number << " (little-endian)"
