@@ -1448,8 +1448,11 @@ namespace stream {
 
     BOOST_LOG(debug) << "Starting microphone receive thread";
 
+    auto retry_delay = 300ms;  // 初始重试延迟，指数退避到最大5秒
+
     while (!broadcast_shutdown_event->peek()) {
       if (!ctx.mic_socket_enabled.load()) {
+        retry_delay = 300ms;  // 会话结束时重置延迟
         std::this_thread::sleep_for(100ms);
         continue;
       }
@@ -1457,7 +1460,8 @@ namespace stream {
       // 延迟初始化麦克风设备
       if (!mic_device_initialized) {
         if (audio::init_mic_redirect_device() != 0) {
-          std::this_thread::sleep_for(100ms);
+          std::this_thread::sleep_for(retry_delay);
+          retry_delay = std::min(retry_delay * 2, 5000ms);  // 指数退避，最大5秒
           continue;
         }
         mic_device_initialized = true;
@@ -1550,25 +1554,22 @@ namespace stream {
     // 初始化接收函数
     auto init_recv_func = [&](auto &sock, size_t buf_idx, auto &session_map, std::string_view type_str) {
       recv_funcs[buf_idx] = [&, buf_idx, type_str](const boost::system::error_code &ec, size_t bytes) {
-        auto fg = util::fail_guard([&]() {
-          try {
-            sock.async_receive_from(asio::buffer(buffers[buf_idx]), peer, 0, recv_funcs[buf_idx]);
-          }
-          catch (const std::exception &e) {
-            BOOST_LOG(error) << "Failed to restart async receive: " << e.what();
-          }
-        });
+        // 静默处理正常关闭错误
+        if (ec == boost::asio::error::operation_aborted ||
+            ec == boost::asio::error::bad_descriptor) {
+          return;  // Socket已关闭，不重新调度
+        }
 
-        // 静默处理网络错误
+        // 静默处理网络连接错误
         if (ec == boost::system::errc::connection_refused ||
             ec == boost::system::errc::connection_reset) {
-          return;
+          return;  // 连接错误，不重新调度
         }
 
         // 如果有其他错误，记录并返回
         if (ec) {
           BOOST_LOG(error) << type_str << " receive error: "sv << ec.message();
-          return;
+          return;  // 有错误，不重新调度
         }
 
         BOOST_LOG(verbose) << "Recv: "sv << peer.address().to_string() << ':' << peer.port() << " :: " << type_str;
@@ -1576,10 +1577,19 @@ namespace stream {
         update_session_map(message_queue_queue, peer_to_video_session, peer_to_audio_session);
         if (bytes == 0) {
           BOOST_LOG(warning) << "Received empty packet";
-          return;
+          // 即使是空包，也继续接收
+        }
+        else {
+          handle_ping(session_map, peer, buffers[buf_idx], bytes, type_str);
         }
 
-        handle_ping(session_map, peer, buffers[buf_idx], bytes, type_str);
+        // 只有在成功接收数据后才重新调度
+        try {
+          sock.async_receive_from(asio::buffer(buffers[buf_idx]), peer, 0, recv_funcs[buf_idx]);
+        }
+        catch (const std::exception &e) {
+          BOOST_LOG(error) << "Failed to restart async receive: " << e.what();
+        }
       };
     };
 
@@ -2130,19 +2140,23 @@ namespace stream {
       return -1;
     }
 
-    // 总是启动麦克风socket，后续根据会话需要决定是否关闭
-    ctx.mic_sock.open(protocol, ec);
-    if (ec) {
-      BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
-      return -1;
+    // 仅在启用麦克风串流时启动麦克风socket
+    if (config::audio.stream_mic) {
+      ctx.mic_sock.open(protocol, ec);
+      if (ec) {
+        BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
+        return -1;
+      }
+      ctx.mic_sock.bind(udp::endpoint(protocol, mic_port), ec);
+      if (ec) {
+        BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << mic_port << "]: "sv << ec.message();
+        return -1;
+      }
+      ctx.mic_socket_enabled.store(true);
+      BOOST_LOG(info) << "Microphone socket started on port " << mic_port;
+    } else {
+      BOOST_LOG(info) << "Microphone streaming disabled by config";
     }
-    ctx.mic_sock.bind(udp::endpoint(protocol, mic_port), ec);
-    if (ec) {
-      BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << mic_port << "]: "sv << ec.message();
-      return -1;
-    }
-    ctx.mic_socket_enabled.store(true);
-    BOOST_LOG(info) << "Microphone socket started on port " << mic_port;
 
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
