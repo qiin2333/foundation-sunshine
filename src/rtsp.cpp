@@ -1045,6 +1045,7 @@ namespace rtsp_stream {
     args.try_emplace("x-ss-general.encryptionEnabled"sv, "0"sv);
     args.try_emplace("x-ss-video[0].chromaSamplingType"sv, "0"sv);
     args.try_emplace("x-ss-video[0].intraRefresh"sv, "0"sv);
+    args.try_emplace("x-nv-video[0].clientRefreshRateX100"sv, "0"sv);  // NTSC framerate support (e.g., 5994 = 59.94fps)
 
     stream::config_t config;
 
@@ -1083,6 +1084,43 @@ namespace rtsp_stream {
       config.monitor.dynamicRange = util::from_view(args.at("x-nv-video[0].dynamicRangeMode"sv));
       config.monitor.chromaSamplingType = util::from_view(args.at("x-ss-video[0].chromaSamplingType"sv));
       config.monitor.enableIntraRefresh = util::from_view(args.at("x-ss-video[0].intraRefresh"sv));
+
+      // Parse clientRefreshRateX100 for NTSC framerate support
+      // This value is the client's requested refresh rate multiplied by 100
+      // e.g., 5994 = 59.94fps, 11988 = 119.88fps, 6000 = 60fps
+      int clientRefreshRateX100 = util::from_view(args.at("x-nv-video[0].clientRefreshRateX100"sv));
+      if (clientRefreshRateX100 > 0) {
+        // Convert clientRefreshRateX100 to fractional framerate
+        // Check if this is an NTSC framerate (divisible by 1001/1000 pattern)
+        // Common NTSC rates: 2397 (23.976), 2997 (29.97), 5994 (59.94), 11988 (119.88), 14385 (143.85), 23976 (239.76)
+        int remainder = clientRefreshRateX100 % 100;
+        if (remainder == 94 || remainder == 97 || remainder == 76 || remainder == 85 || remainder == 88) {
+          // This looks like an NTSC framerate, use 1001 denominator
+          // clientRefreshRateX100 / 100 ≈ frameRateNum / 1001
+          // So frameRateNum = clientRefreshRateX100 * 1001 / 100
+          config.monitor.frameRateNum = (clientRefreshRateX100 * 1001 + 50) / 100;  // Round to nearest
+          config.monitor.frameRateDen = 1001;
+          BOOST_LOG(info) << "Client requested NTSC framerate: " << clientRefreshRateX100 / 100.0
+                          << " fps (" << config.monitor.frameRateNum << "/" << config.monitor.frameRateDen << ")";
+        }
+        else {
+          // Integer framerate, use simple fraction
+          config.monitor.frameRateNum = clientRefreshRateX100;
+          config.monitor.frameRateDen = 100;
+          // Simplify the fraction if possible
+          if (clientRefreshRateX100 % 100 == 0) {
+            config.monitor.frameRateNum = clientRefreshRateX100 / 100;
+            config.monitor.frameRateDen = 1;
+          }
+          BOOST_LOG(info) << "Client requested framerate: " << clientRefreshRateX100 / 100.0
+                          << " fps (" << config.monitor.frameRateNum << "/" << config.monitor.frameRateDen << ")";
+        }
+      }
+      else {
+        // No clientRefreshRateX100 provided, use maxFPS as integer framerate
+        config.monitor.frameRateNum = config.monitor.framerate;
+        config.monitor.frameRateDen = 1;
+      }
 
       configuredBitrateKbps = util::from_view(args.at("x-ml-video.configuredBitrateKbps"sv));
       
