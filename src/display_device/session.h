@@ -232,6 +232,7 @@ namespace display_device {
     std::string last_vdd_setting; /**< Last VDD resolution and refresh rate setting. */
     std::string current_vdd_client_id; /**< Current client ID associated with VDD monitor. */
     std::string original_output_name; /**< Original output_name value before VDD device ID was set. */
+    boost::optional<parsed_config_t::device_prep_e> current_device_prep; /**< Current device preparation mode, respecting client overrides. */
 
     /**
      * @brief An instance of StateRetryTimer.

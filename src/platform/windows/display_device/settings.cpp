@@ -460,6 +460,26 @@ namespace display_device {
         return true;
       }
 
+      // 在移除VDD之前，先检查拓扑中是否有VDD，如果有则销毁
+      // 因为remove_vdd会从拓扑中移除VDD，导致后续无法判断是否需要销毁
+      bool vdd_needs_destruction = false;
+      for (const auto &group : data.topology.modified) {
+        for (const auto &device_id : group) {
+          const auto friendly_name = get_display_friendly_name(device_id);
+          if (friendly_name == ZAKO_NAME) {
+            vdd_needs_destruction = true;
+            break;
+          }
+        }
+        if (vdd_needs_destruction) break;
+      }
+
+      // 如果拓扑中有VDD，先销毁VDD
+      if (vdd_needs_destruction) {
+        BOOST_LOG(info) << "检测到VDD在拓扑中，先销毁VDD";
+        display_device::session_t::get().destroy_vdd_monitor();
+      }
+
       // Remove VDD devices from topology before reverting, as VDD may have been destroyed
       const bool vdd_removed_from_initial = remove_vdd_from_topology(data.topology.initial);
       const bool vdd_removed_from_modified = remove_vdd_from_topology(data.topology.modified);
@@ -659,8 +679,23 @@ namespace display_device {
   }
 
   settings_t::apply_result_t
-  settings_t::apply_config(const parsed_config_t &config, const rtsp_stream::launch_session_t &session) {
-    const auto do_apply_config { [this](const parsed_config_t &config) -> settings_t::apply_result_t {
+  settings_t::apply_config(
+    const parsed_config_t &config,
+    const rtsp_stream::launch_session_t &session,
+    const boost::optional<active_topology_t> &pre_saved_initial_topology) {
+    const auto do_apply_config { [this, &pre_saved_initial_topology](const parsed_config_t &config) -> settings_t::apply_result_t {
+      // no_operation模式：完全不做任何事情
+      if (config.device_prep == parsed_config_t::device_prep_e::no_operation) {
+        BOOST_LOG(info) << "Display device preparation mode is set to no_operation, skipping all display settings changes";
+        
+        // 注意：这里不要清除persistent_data！
+        // 1. 如果一开始就是no_operation，persistent_data本来就是空的，保持为空即可。
+        // 2. 如果之前是active模式（已有persistent_data），中途切换成no_operation，我们需要保留persistent_data，
+        //    以便在最终结束串流时能恢复到最初的状态。如果清除，会导致无法恢复之前的修改。
+        
+        return { apply_result_t::result_e::success };
+      }
+      
       bool failed_while_reverting_settings { false };
       const boost::optional<topology_pair_t> previously_configured_topology { persistent_data ? boost::make_optional(persistent_data->topology) : boost::none };
 
@@ -678,7 +713,7 @@ namespace display_device {
           audio_data = std::make_unique<audio_data_t>();
         }
         return true;
-      }) };
+      }, pre_saved_initial_topology) };
       if (!topology_result) {
         // Error already logged
         return { failed_while_reverting_settings ? apply_result_t::result_e::revert_fail : apply_result_t::result_e::topology_fail };
@@ -892,6 +927,11 @@ namespace display_device {
       BOOST_LOG(debug) << "Releasing captured audio sink";
       audio_data = nullptr;
     }
+  }
+
+  bool
+  settings_t::has_persistent_data() const {
+    return persistent_data != nullptr;
   }
 
 }  // namespace display_device

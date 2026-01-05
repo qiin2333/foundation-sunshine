@@ -153,7 +153,10 @@ namespace display_device {
      * ```
      */
     apply_result_t
-    apply_config(const parsed_config_t &config, const rtsp_stream::launch_session_t &session);
+    apply_config(
+      const parsed_config_t &config,
+      const rtsp_stream::launch_session_t &session,
+      const boost::optional<active_topology_t> &pre_saved_initial_topology = boost::none);
 
     /**
      * @brief Revert the applied configuration and restore the previous settings.
@@ -200,8 +203,15 @@ namespace display_device {
      * }
      * ```
      */
-    void
+   void
     reset_persistence();
+
+    /**
+     * @brief Check if there is saved persistent data.
+     * @returns True if persistent data exists, false otherwise.
+     */
+    bool
+    has_persistent_data() const;
 
   private:
     std::unique_ptr<persistent_data_t> persistent_data; /**< Platform specific persistent data. */
