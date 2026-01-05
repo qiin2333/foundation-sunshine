@@ -1071,7 +1071,7 @@ namespace rtsp_stream {
 
       // Legacy clients use nvFeatureFlags to indicate support for audio encryption
       if (getArg("x-nv-general.featureFlags"sv) & 0x20) {
-        config.encryptionFlagsEnabled |= SS_ENC_AUDIO | SS_ENC_MIC;
+        config.encryptionFlagsEnabled |= SS_ENC_AUDIO;
       }
 
       auto &monitor = config.monitor;
