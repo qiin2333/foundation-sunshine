@@ -213,6 +213,13 @@ namespace display_device {
     bool
     has_persistent_data() const;
 
+    /**
+     * @brief Check if VDD is in the initial topology.
+     * @returns True if VDD is in the initial topology, false otherwise.
+     */
+    bool
+    is_vdd_in_initial_topology() const;
+
   private:
     std::unique_ptr<persistent_data_t> persistent_data; /**< Platform specific persistent data. */
     std::unique_ptr<audio_data_t> audio_data; /**< Platform specific temporary audio data. */

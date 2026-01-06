@@ -934,4 +934,21 @@ namespace display_device {
     return persistent_data != nullptr;
   }
 
+  bool
+  settings_t::is_vdd_in_initial_topology() const {
+    if (!persistent_data) {
+      return false;
+    }
+    
+    for (const auto &group : persistent_data->topology.initial) {
+      for (const auto &device_id : group) {
+        const auto friendly_name = get_display_friendly_name(device_id);
+        if (friendly_name == ZAKO_NAME) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
 }  // namespace display_device

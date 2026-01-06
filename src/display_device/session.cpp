@@ -9,6 +9,7 @@
 #include "src/confighttp.h"
 #include "src/globals.h"
 #include "src/platform/common.h"
+#include "src/platform/windows/display_device/session_listener.h"
 #include "src/platform/windows/display_device/windows_utils.h"
 #include "src/rtsp.h"
 #include "to_string.h"
@@ -142,6 +143,10 @@ namespace display_device {
   std::unique_ptr<session_t::deinit_t>
   session_t::init() {
     session_t::get().settings.set_filepath(platf::appdata() / "original_display_settings.json");
+    
+    // 初始化会话事件监听器（用于检测解锁事件）
+    SessionEventListener::init(nullptr);
+    
     session_t::get().restore_state();
     return std::make_unique<deinit_t>();
   }
@@ -298,8 +303,19 @@ namespace display_device {
     const bool will_use_vdd = session.use_vdd || requested_device_id.empty() || is_vdd_device;
     
     if (will_use_vdd && !vdd_already_exists) {
-      pre_saved_initial_topology = get_current_topology();
-      BOOST_LOG(debug) << "Pre-saved initial topology before VDD creation: " << to_string(*pre_saved_initial_topology);
+      // 如果有待恢复的设置，保留旧的初始拓扑，不要覆盖
+      if (pending_restore_ && settings.has_persistent_data()) {
+        BOOST_LOG(info) << "有待恢复的设置，保留原有初始拓扑";
+        // 取消待恢复标志，因为新串流要开始了
+        pending_restore_ = false;
+        SessionEventListener::clear_unlock_callback();
+        timer->setup_timer(nullptr);
+        // 不设置 pre_saved_initial_topology，让 apply_config 复用已有的
+      }
+      else {
+        pre_saved_initial_topology = get_current_topology();
+        BOOST_LOG(debug) << "Pre-saved initial topology before VDD creation: " << to_string(*pre_saved_initial_topology);
+      }
     }
     else if (will_use_vdd && vdd_already_exists) {
       BOOST_LOG(debug) << "VDD already exists, skipping initial topology save (topology may be corrupted)";
@@ -477,37 +493,36 @@ namespace display_device {
 
   void
   session_t::restore_state_impl(revert_reason_e reason) {
-    // 智能VDD清理逻辑：
-    // 1. 如果有persistent_data，说明apply_config被正常调用，VDD会由revert_settings根据拓扑处理
-    // 2. 如果没有persistent_data，需要判断是否是异常VDD残留：
-    //    - no_operation模式：不清理VDD（VDD常驻场景）
-    //    - 非no_operation模式：清理异常残留的VDD
-    if (reason == revert_reason_e::stream_ended && !settings.has_persistent_data()) {
-      const auto vdd_id = display_device::find_device_by_friendlyname(ZAKO_NAME);
-      if (!vdd_id.empty()) {
-        // 优先使用当前会话的device_prep（可能包含客户端override），如果没有则回退到全局配置
-        const auto device_prep = current_device_prep.value_or(
-          static_cast<parsed_config_t::device_prep_e>(config::video.display_device_prep)
-        );
-        if (device_prep == parsed_config_t::device_prep_e::no_operation) {
-          BOOST_LOG(debug) << "no_operation模式，保持VDD不变";
-        }
-        else {
-          // 非no_operation模式但没有persistent_data，说明是异常残留
-          auto devices = display_device::enum_available_devices();
-          if (devices.size() > 1 && is_display_on()) {
-            BOOST_LOG(info) << "检测到异常残留的VDD（无persistent_data），清理VDD";
-            destroy_vdd_monitor();
-          }
+    // 统一的VDD清理逻辑（在恢复拓扑之前执行，不需要CCD API，锁屏时也可以执行）
+    const auto vdd_id = display_device::find_device_by_friendlyname(ZAKO_NAME);
+    if (!vdd_id.empty()) {
+      const auto device_prep = current_device_prep.value_or(
+        static_cast<parsed_config_t::device_prep_e>(config::video.display_device_prep)
+      );
+      
+      bool should_destroy = false;
+      
+      if (device_prep == parsed_config_t::device_prep_e::no_operation) {
+        // no_operation模式：VDD常驻，不销毁
+        BOOST_LOG(debug) << "no_operation模式，保持VDD不变";
+      }
+      else if (settings.has_persistent_data()) {
+        // 有记忆：VDD不在初始拓扑中就销毁
+        if (!settings.is_vdd_in_initial_topology()) {
+          BOOST_LOG(info) << "VDD不在初始拓扑中，先销毁VDD";
+          should_destroy = true;
         }
       }
-    }
-
-    // 检测RDP会话
-    if (w_utils::is_any_rdp_session_active()) {
-      BOOST_LOG(info) << "Detected RDP remote session, disabling display settings recovery";
-      stop_timer_and_clear_vdd_state();
-      return;
+      else {
+        // 无记忆：异常残留，销毁
+        BOOST_LOG(info) << "检测到异常残留的VDD（无persistent_data），清理VDD";
+        should_destroy = true;
+      }
+      
+      if (should_destroy) {
+        destroy_vdd_monitor();
+        std::this_thread::sleep_for(500ms);
+      }
     }
 
     if (!settings.is_changing_settings_going_to_fail() && settings.revert_settings(reason)) {
@@ -518,28 +533,72 @@ namespace display_device {
         BOOST_LOG(warning) << "Try reverting display settings will fail - retrying later...";
       }
 
-      // 限制重试次数，避免无限循环
-      static int retry_count = 0;
-      const int max_retries = 20;
-
-      timer->setup_timer([this, reason]() {
-        if (settings.is_changing_settings_going_to_fail()) {
-          retry_count++;
-          if (retry_count >= max_retries) {
-            BOOST_LOG(warning) << "已达到最大重试次数，停止尝试恢复显示设置";
-            clear_vdd_state();
-            return true;  // 返回true停止重试
+      // 优先使用事件监听，如果不可用则回退到轮询
+      // 先清除之前的回调/timer，防止重复注册
+      SessionEventListener::clear_unlock_callback();
+      timer->setup_timer(nullptr);
+      
+      // 设置待恢复标志
+      pending_restore_ = true;
+      
+      if (SessionEventListener::is_event_based()) {
+        // 事件驱动：注册解锁回调
+        BOOST_LOG(info) << "使用事件监听等待解锁...";
+        SessionEventListener::register_unlock_callback([this, reason]() {
+          std::lock_guard lock { mutex };
+          
+          // 检查是否还需要恢复（可能已经被取消或新串流已开始）
+          if (!pending_restore_) {
+            BOOST_LOG(debug) << "恢复操作已取消，跳过";
+            return;
           }
-          BOOST_LOG(warning) << "Timer: Reverting display settings will still fail - retrying later... (Count: " << retry_count << "/" << max_retries << ")";
-          return false;
-        }
+          
+          // 解锁后执行恢复
+          if (!settings.is_changing_settings_going_to_fail()) {
+            auto result = settings.revert_settings(reason);
+            BOOST_LOG(info) << "解锁后恢复显示设置" << (result ? "成功" : "失败");
+          }
+          else {
+            BOOST_LOG(warning) << "解锁后仍无法恢复显示设置，可能仍在锁屏状态";
+          }
+          pending_restore_ = false;
+          clear_vdd_state();
+        });
+      }
+      else {
+        // 回退到轮询机制
+        BOOST_LOG(info) << "事件监听不可用，使用轮询机制...";
+        
+        static int retry_count = 0;
+        retry_count = 0;  // 重置计数器
+        const int max_retries = 20;
 
-        // 只恢复一次
-        auto result = settings.revert_settings(reason);
-        BOOST_LOG(info) << "尝试恢复显示设置" << (result ? "成功" : "失败") << "，不再重试";
-        clear_vdd_state();
-        return true;
-      });
+        timer->setup_timer([this, reason]() {
+          // 检查是否还需要恢复
+          if (!pending_restore_) {
+            BOOST_LOG(debug) << "恢复操作已取消，跳过";
+            return true;
+          }
+          
+          if (settings.is_changing_settings_going_to_fail()) {
+            retry_count++;
+            if (retry_count >= max_retries) {
+              BOOST_LOG(warning) << "已达到最大重试次数，停止尝试恢复显示设置";
+              pending_restore_ = false;
+              clear_vdd_state();
+              return true;
+            }
+            BOOST_LOG(warning) << "Timer: 仍在等待解锁... (Count: " << retry_count << "/" << max_retries << ")";
+            return false;
+          }
+
+          auto result = settings.revert_settings(reason);
+          BOOST_LOG(info) << "尝试恢复显示设置" << (result ? "成功" : "失败") << "，不再重试";
+          pending_restore_ = false;
+          clear_vdd_state();
+          return true;
+        });
+      }
     }
   }
 
