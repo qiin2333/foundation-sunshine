@@ -10,6 +10,7 @@
 #include "src/display_device/to_string.h"
 #include "src/globals.h"
 #include "src/logging.h"
+#include "src/config.h"
 #include "src/rtsp.h"
 #include "windows_utils.h"
 
@@ -460,24 +461,56 @@ namespace display_device {
         return true;
       }
 
-      // 在移除VDD之前，先检查拓扑中是否有VDD，如果有则销毁
-      // 因为remove_vdd会从拓扑中移除VDD，导致后续无法判断是否需要销毁
-      bool vdd_needs_destruction = false;
+      // 在移除VDD之前，先检查拓扑中是否有VDD
+      // 收集VDD的设备ID，分别记录：
+      // - vdd_device_ids: 所有VDD设备ID（用于从HDR/modes中清理）
+      // - vdd_in_modified_only: 只在modified拓扑中的VDD（需要销毁）
+      std::unordered_set<std::string> vdd_device_ids;
+      std::unordered_set<std::string> vdd_in_initial;
+      
+      // 收集 initial 拓扑中的 VDD
+      for (const auto &group : data.topology.initial) {
+        for (const auto &device_id : group) {
+          const auto friendly_name = get_display_friendly_name(device_id);
+          if (friendly_name == ZAKO_NAME) {
+            vdd_device_ids.insert(device_id);
+            vdd_in_initial.insert(device_id);
+          }
+        }
+      }
+      
+      // 收集 modified 拓扑中的 VDD
       for (const auto &group : data.topology.modified) {
         for (const auto &device_id : group) {
           const auto friendly_name = get_display_friendly_name(device_id);
           if (friendly_name == ZAKO_NAME) {
-            vdd_needs_destruction = true;
+            vdd_device_ids.insert(device_id);
+          }
+        }
+      }
+
+      // 如果有VDD不在initial拓扑中（由Sunshine创建），则销毁
+      // 如果VDD在initial拓扑中（用户常驻VDD），则保留
+      // 如果启用了"保持启用"模式，也保留VDD
+      bool should_destroy_vdd = false;
+      if (!config::video.vdd_keep_enabled) {
+        for (const auto &vdd_id : vdd_device_ids) {
+          if (vdd_in_initial.count(vdd_id) == 0) {
+            should_destroy_vdd = true;
             break;
           }
         }
-        if (vdd_needs_destruction) break;
       }
-
-      // 如果拓扑中有VDD，先销毁VDD
-      if (vdd_needs_destruction) {
-        BOOST_LOG(info) << "检测到VDD在拓扑中，先销毁VDD";
+      
+      if (config::video.vdd_keep_enabled) {
+        BOOST_LOG(debug) << "VDD保持启用模式已开启，保留VDD";
+      }
+      else if (should_destroy_vdd) {
+        BOOST_LOG(info) << "检测到Sunshine创建的VDD（不在初始拓扑中），销毁VDD";
         display_device::session_t::get().destroy_vdd_monitor();
+      }
+      else if (!vdd_in_initial.empty()) {
+        BOOST_LOG(debug) << "VDD在初始拓扑中（常驻VDD），保留不销毁";
       }
 
       // Remove VDD devices from topology before reverting, as VDD may have been destroyed
@@ -485,6 +518,30 @@ namespace display_device {
       const bool vdd_removed_from_modified = remove_vdd_from_topology(data.topology.modified);
       if (vdd_removed_from_initial || vdd_removed_from_modified) {
         BOOST_LOG(info) << "Removed VDD devices from persistent topology (VDD may have been destroyed)";
+        data_modified = true;
+      }
+      
+      // Also remove VDD entries from HDR states and modes using collected device IDs
+      // (get_display_friendly_name won't work after VDD is destroyed)
+      auto remove_vdd_ids_from_map = [&vdd_device_ids](auto &device_map) -> bool {
+        bool removed = false;
+        for (auto it = device_map.begin(); it != device_map.end(); ) {
+          if (vdd_device_ids.count(it->first) > 0) {
+            it = device_map.erase(it);
+            removed = true;
+          } else {
+            ++it;
+          }
+        }
+        return removed;
+      };
+      
+      if (remove_vdd_ids_from_map(data.original_hdr_states)) {
+        BOOST_LOG(debug) << "Removed VDD from original_hdr_states";
+        data_modified = true;
+      }
+      if (remove_vdd_ids_from_map(data.original_modes)) {
+        BOOST_LOG(debug) << "Removed VDD from original_modes";
         data_modified = true;
       }
 
@@ -872,10 +929,11 @@ namespace display_device {
     if (persistent_data) {
       // 尝试恢复设置
       bool data_updated { false };
-      if (!try_revert_settings(*persistent_data, data_updated)) {
-        if (data_updated)
+      bool success = try_revert_settings(*persistent_data, data_updated);
+      if (!success) {
+        if (data_updated) {
           save_settings(filepath, *persistent_data);  // 忽略返回值
-
+        }
         BOOST_LOG(fatal) << "恢复显示设备设置失败！建议立即使用重置记忆术~";
       }
 
@@ -891,7 +949,9 @@ namespace display_device {
         }
       }
 
-      BOOST_LOG(info) << "显示设备配置已恢复";
+      if (success) {
+        BOOST_LOG(info) << "显示设备配置已恢复";
+      }
     }
 
     if (reason == revert_reason_e::stream_ended) {

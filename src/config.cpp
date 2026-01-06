@@ -394,6 +394,7 @@ namespace config {
     true,  // nv_opengl_vulkan_on_dxgi
     true,  // nv_sunshine_high_power_mode
     false,  // preferUseVdd
+    false,  // vdd_keep_enabled
     {},  // nv_legacy
 
     {
@@ -443,7 +444,7 @@ namespace config {
     (int) display_device::parsed_config_t::hdr_prep_e::automatic,  // hdr_prep
     {},  // display_mode_remapping
     false,  // variable_refresh_rate
-    0  // minimum_fps_target (0 = auto, about half the stream FPS)
+    0,  // minimum_fps_target (0 = auto, about half the stream FPS)
   };
 
   audio_t audio {
@@ -1219,6 +1220,7 @@ namespace config {
     int_f(vars, "max_bitrate", video.max_bitrate);
     bool_f(vars, "variable_refresh_rate", video.variable_refresh_rate);
     int_between_f(vars, "minimum_fps_target", video.minimum_fps_target, { 0, 1000 });
+    bool_f(vars, "vdd_keep_enabled", video.vdd_keep_enabled);
 
     path_f(vars, "pkey", nvhttp.pkey);
     path_f(vars, "cert", nvhttp.cert);

@@ -505,9 +505,9 @@ namespace display_device {
       
       bool should_destroy = false;
       
-      if (device_prep == parsed_config_t::device_prep_e::no_operation) {
-        // no_operation模式：VDD常驻，不销毁
-        BOOST_LOG(debug) << "no_operation模式，保持VDD不变";
+      if (device_prep == parsed_config_t::device_prep_e::no_operation || config::video.vdd_keep_enabled) {
+        // no_operation模式或启用了"保持启用"：VDD常驻，不销毁
+        BOOST_LOG(debug) << "VDD保持启用（no_operation=" << (device_prep == parsed_config_t::device_prep_e::no_operation) << ", vdd_keep_enabled=" << config::video.vdd_keep_enabled << "）";
       }
       else if (settings.has_persistent_data()) {
         // 有记忆：VDD不在初始拓扑中就销毁
