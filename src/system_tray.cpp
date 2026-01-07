@@ -146,11 +146,6 @@ namespace system_tray {
     tray_menus[9].text = s_help_us.c_str();
     tray_menus[9].submenu[0].text = s_developer_yundi339.c_str();
     tray_menus[9].submenu[1].text = s_developer_qiin.c_str();
-    
-    // 更新 VDD 子菜单文本
-    vdd_submenu[0].text = s_vdd_create.c_str();
-    vdd_submenu[1].text = s_vdd_close.c_str();
-    vdd_submenu[2].text = s_vdd_persistent.c_str();
   #ifdef _WIN32
     tray_menus[11].text = s_reset_display_device_config.c_str();
     tray_menus[12].text = s_restart.c_str();
