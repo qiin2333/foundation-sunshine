@@ -419,11 +419,42 @@ namespace display_device {
     // Rebuild VDD device on client switch
     if (!device_zako.empty() && !current_vdd_client_id.empty() &&
         !current_client_id.empty() && current_vdd_client_id != current_client_id) {
-      BOOST_LOG(info) << "客户端切换，重建VDD设备";
-      vdd_utils::destroy_vdd_monitor();
-      clear_vdd_state();
-      device_zako.clear();
-      std::this_thread::sleep_for(500ms);
+      
+      // 获取设备准备模式
+      const auto device_prep = current_device_prep.value_or(
+        static_cast<parsed_config_t::device_prep_e>(config::video.display_device_prep)
+      );
+      
+      // 无操作模式：复用VDD，只更新客户端ID
+      if (device_prep == parsed_config_t::device_prep_e::no_operation) {
+        BOOST_LOG(info) << "无操作模式，客户端切换时复用现有VDD";
+        current_vdd_client_id = current_client_id;
+        // 不销毁VDD，不重建，直接继续使用
+      }
+      else {
+        // 常驻模式和非常驻模式：销毁并重建VDD
+        BOOST_LOG(info) << "客户端切换，重建VDD设备";
+        
+        const auto old_vdd_id = device_zako;
+        vdd_utils::destroy_vdd_monitor();
+        clear_vdd_state();
+        device_zako.clear();
+        
+        // Handle VDD ID in persistent_data
+        if (config::video.vdd_keep_enabled) {
+          // 常驻模式：需要替换ID（保留VDD在persistent_data中）
+          should_replace_vdd_id_ = true;
+          old_vdd_id_ = old_vdd_id;
+          BOOST_LOG(debug) << "标记需要替换VDD ID: " << old_vdd_id;
+        }
+        else {
+          // 非常驻模式：从initial中移除VDD
+          BOOST_LOG(debug) << "从initial拓扑中移除VDD: " << old_vdd_id;
+          settings.remove_vdd_from_initial_topology(old_vdd_id);
+        }
+        
+        std::this_thread::sleep_for(500ms);
+      }
     }
 
     // Update VDD resolution configuration
@@ -461,6 +492,14 @@ namespace display_device {
       BOOST_LOG(debug) << "保存原始 output_name: " << original_output_name;
     }
 
+    // Replace VDD ID if needed (after client switch in keep_enabled mode)
+    if (should_replace_vdd_id_ && !old_vdd_id_.empty()) {
+      BOOST_LOG(info) << "替换persistent_data中的VDD ID: " << old_vdd_id_ << " -> " << device_zako;
+      settings.replace_vdd_id(old_vdd_id_, device_zako);
+      should_replace_vdd_id_ = false;
+      old_vdd_id_.clear();
+    }
+    
     // Update configuration and state
     config.device_id = device_zako;
     config::video.output_name = device_zako;
@@ -505,19 +544,21 @@ namespace display_device {
       
       bool should_destroy = false;
       
-      if (device_prep == parsed_config_t::device_prep_e::no_operation || config::video.vdd_keep_enabled) {
-        // no_operation模式或启用了"保持启用"：VDD常驻，不销毁
-        BOOST_LOG(debug) << "VDD保持启用（no_operation=" << (device_prep == parsed_config_t::device_prep_e::no_operation) << ", vdd_keep_enabled=" << config::video.vdd_keep_enabled << "）";
+      // 判断1：无操作模式 - 保留VDD
+      if (device_prep == parsed_config_t::device_prep_e::no_operation) {
+        BOOST_LOG(debug) << "无操作模式，保留VDD";
       }
+      // 判断2：常驻模式 - 保留VDD
+      else if (config::video.vdd_keep_enabled) {
+        BOOST_LOG(debug) << "常驻模式，保留VDD";
+      }
+      // 判断3：有persistent_data - 非常驻模式销毁VDD（无论是否在初始拓扑）
       else if (settings.has_persistent_data()) {
-        // 有记忆：VDD不在初始拓扑中就销毁
-        if (!settings.is_vdd_in_initial_topology()) {
-          BOOST_LOG(info) << "VDD不在初始拓扑中，先销毁VDD";
-          should_destroy = true;
-        }
+        BOOST_LOG(info) << "非常驻/无操作模式，销毁VDD";
+        should_destroy = true;
       }
+      // 判断4：无persistent_data（异常残留）- 非常驻模式清理
       else {
-        // 无记忆：异常残留，销毁
         BOOST_LOG(info) << "检测到异常残留的VDD（无persistent_data），清理VDD";
         should_destroy = true;
       }

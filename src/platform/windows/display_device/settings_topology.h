@@ -105,7 +105,7 @@ namespace display_device {
    * }
    * ```
    */
-  bool
+  std::unordered_set<std::string>
   remove_vdd_from_topology(active_topology_t &topology);
 
 }  // namespace display_device

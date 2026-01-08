@@ -202,9 +202,9 @@ namespace display_device {
 
   }  // namespace
 
-  bool
+  std::unordered_set<std::string>
   remove_vdd_from_topology(active_topology_t &topology) {
-    bool removed = false;
+    std::unordered_set<std::string> removed_device_ids;
     
     // Get list of available devices (includes both active and inactive devices)
     // This ensures we don't remove inactive devices that can be re-enabled
@@ -217,7 +217,7 @@ namespace display_device {
 
     for (auto &group : topology) {
       auto new_end = std::remove_if(group.begin(), group.end(),
-        [&removed, &available_device_ids](const std::string &device_id) {
+        [&removed_device_ids, &available_device_ids](const std::string &device_id) {
           // First check if device exists in available devices
           // Note: available_devices includes inactive devices, so inactive devices will pass this check
           const bool device_exists = available_device_ids.count(device_id) > 0;
@@ -227,7 +227,7 @@ namespace display_device {
             // This means the device was truly destroyed (e.g., VDD uninstalled, physical display disconnected)
             // It's safe to remove as it cannot be re-enabled
             BOOST_LOG(debug) << "Removing non-existent device from topology: " << device_id;
-            removed = true;
+            removed_device_ids.insert(device_id);  // Track removed ID
             return true;
           }
           
@@ -236,7 +236,7 @@ namespace display_device {
           const auto friendly_name = get_display_friendly_name(device_id);
           if (friendly_name == ZAKO_NAME) {
             BOOST_LOG(debug) << "Removing VDD device from topology: " << device_id;
-            removed = true;
+            removed_device_ids.insert(device_id);  // Track removed ID
             return true;
           }
           
@@ -252,7 +252,7 @@ namespace display_device {
         [](const auto &group) { return group.empty(); }),
       topology.end());
 
-    return removed;
+    return removed_device_ids;
   }
 
   /**

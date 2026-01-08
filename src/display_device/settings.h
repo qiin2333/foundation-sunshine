@@ -220,6 +220,21 @@ namespace display_device {
     bool
     is_vdd_in_initial_topology() const;
 
+    /**
+     * @brief Remove VDD from initial and modified topology.
+     * @param vdd_id The VDD device ID to remove.
+     */
+    void
+    remove_vdd_from_initial_topology(const std::string& vdd_id);
+
+    /**
+     * @brief Replace VDD ID in initial and modified topology.
+     * @param old_id The old VDD device ID.
+     * @param new_id The new VDD device ID.
+     */
+    void
+    replace_vdd_id(const std::string& old_id, const std::string& new_id);
+
   private:
     std::unique_ptr<persistent_data_t> persistent_data; /**< Platform specific persistent data. */
     std::unique_ptr<audio_data_t> audio_data; /**< Platform specific temporary audio data. */

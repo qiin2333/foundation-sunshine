@@ -234,6 +234,8 @@ namespace display_device {
     std::string original_output_name; /**< Original output_name value before VDD device ID was set. */
     boost::optional<parsed_config_t::device_prep_e> current_device_prep; /**< Current device preparation mode, respecting client overrides. */
     bool pending_restore_ = false; /**< Flag indicating if there is a pending restore settings operation waiting for unlock. */
+    bool should_replace_vdd_id_ = false; /**< Flag indicating if VDD ID needs to be replaced after client switch. */
+    std::string old_vdd_id_; /**< Old VDD ID that needs to be replaced. */
 
     /**
      * @brief An instance of StateRetryTimer.
