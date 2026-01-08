@@ -726,7 +726,21 @@ namespace display_device {
 
   bool
   settings_t::is_changing_settings_going_to_fail() const {
-    return w_utils::is_user_session_locked() || w_utils::test_no_access_to_ccd_api();
+    const bool session_locked = w_utils::is_user_session_locked();
+    
+    // 如果会话已锁定，直接返回true，跳过CCD API测试
+    // 这避免了在锁屏状态下频繁调用显示API导致ERROR_ACCESS_DENIED和WATCHDOG事件
+    if (session_locked) {
+      BOOST_LOG(info) << "Changing settings will fail - session_locked: true";
+      return true;
+    }
+    
+    const bool no_ccd_access = w_utils::test_no_access_to_ccd_api();
+    if (no_ccd_access) {
+      BOOST_LOG(info) << "Changing settings will fail - no_ccd_access: true";
+    }
+    
+    return no_ccd_access;
   }
 
   settings_t::apply_result_t

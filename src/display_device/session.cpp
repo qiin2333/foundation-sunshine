@@ -148,7 +148,7 @@ namespace display_device {
     session_t::get().settings.set_filepath(platf::appdata() / "original_display_settings.json");
     
     // 初始化会话事件监听器（用于检测解锁事件）
-    SessionEventListener::init(nullptr);
+    SessionEventListener::init();
     
     session_t::get().restore_state();
     return std::make_unique<deinit_t>();
@@ -311,7 +311,7 @@ namespace display_device {
         BOOST_LOG(info) << "有待恢复的设置，保留原有初始拓扑";
         // 取消待恢复标志，因为新串流要开始了
         pending_restore_ = false;
-        SessionEventListener::clear_unlock_callback();
+        SessionEventListener::clear_unlock_task();
         timer->setup_timer(nullptr);
         // 不设置 pre_saved_initial_topology，让 apply_config 复用已有的
       }
@@ -349,9 +349,7 @@ namespace display_device {
         return true;
       });
 
-      BOOST_LOG(warning) << "It is already known that display settings cannot be changed. "
-                         << "Allowing stream to start without changing the settings, "
-                         << "but will retry changing settings later...";
+      BOOST_LOG(warning) << "It is already known that display settings cannot be changed. Allowing stream to start without changing the settings, but will retry changing settings later...";
       return;
     }
 
@@ -565,85 +563,89 @@ namespace display_device {
       
       if (should_destroy) {
         destroy_vdd_monitor();
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(1000ms);
       }
     }
 
-    if (!settings.is_changing_settings_going_to_fail() && settings.revert_settings(reason)) {
+    // 添加诊断日志
+    const bool settings_will_fail = settings.is_changing_settings_going_to_fail();
+    BOOST_LOG(debug) << "Checking if reverting settings will fail: " << settings_will_fail;
+    
+    if (!settings_will_fail && settings.revert_settings(reason)) {
       stop_timer_and_clear_vdd_state();
     }
     else {
-      if (settings.is_changing_settings_going_to_fail()) {
-        BOOST_LOG(warning) << "Try reverting display settings will fail - retrying later...";
-      }
-
-      // 优先使用事件监听，如果不可用则回退到轮询
-      // 先清除之前的回调/timer，防止重复注册
-      SessionEventListener::clear_unlock_callback();
-      timer->setup_timer(nullptr);
+      // 无法立即恢复，添加任务到解锁队列
+      BOOST_LOG(warning) << "无法立即恢复显示设置";
       
       // 设置待恢复标志
       pending_restore_ = true;
       
-      if (SessionEventListener::is_event_based()) {
-        // 事件驱动：注册解锁回调
-        BOOST_LOG(info) << "使用事件监听等待解锁...";
-        SessionEventListener::register_unlock_callback([this, reason]() {
+      // 添加恢复任务（自动处理锁屏检查和立即执行）
+      SessionEventListener::add_unlock_task([this, reason]() {
+        // 快速检查是否还需要恢复（最小化锁持有时间）
+        {
           std::lock_guard lock { mutex };
-          
-          // 检查是否还需要恢复（可能已经被取消或新串流已开始）
           if (!pending_restore_) {
-            BOOST_LOG(debug) << "恢复操作已取消，跳过";
+            BOOST_LOG(info) << "恢复操作已取消，跳过";
             return;
           }
-          
-          // 解锁后执行恢复
-          if (!settings.is_changing_settings_going_to_fail()) {
-            auto result = settings.revert_settings(reason);
-            BOOST_LOG(info) << "解锁后恢复显示设置" << (result ? "成功" : "失败");
-          }
-          else {
-            BOOST_LOG(warning) << "解锁后仍无法恢复显示设置，可能仍在锁屏状态";
-          }
-          pending_restore_ = false;
-          clear_vdd_state();
-        });
-      }
-      else {
-        // 回退到轮询机制
-        BOOST_LOG(info) << "事件监听不可用，使用轮询机制...";
+        }
         
-        static int retry_count = 0;
-        retry_count = 0;  // 重置计数器
-        const int max_retries = 20;
+        // 在锁外执行CCD检查和恢复操作（避免阻塞托盘等其他操作）
+        if (settings.is_changing_settings_going_to_fail()) {
+          // 解锁后CCD仍不可用，启动轮询作为fallback
+          BOOST_LOG(warning) << "CCD API仍不可用，启动轮询机制";
+          std::lock_guard lock { mutex };
+          this->start_polling_restore(reason);
+          return;  // 轮询会处理清理
+        }
+        
+        // 执行恢复（这可能需要几秒钟，不要持锁）
+        auto result = settings.revert_settings(reason);
+        BOOST_LOG(info) << "恢复显示设置" << (result ? "成功" : "失败");
+        
+        // 恢复完成后清除标志和状态（在锁内执行，确保线程安全）
+        {
+          std::lock_guard lock { mutex };
+          pending_restore_ = false;
+          stop_timer_and_clear_vdd_state();
+        }
+      });
+    }
+  }
 
-        timer->setup_timer([this, reason]() {
-          // 检查是否还需要恢复
-          if (!pending_restore_) {
-            BOOST_LOG(debug) << "恢复操作已取消，跳过";
-            return true;
-          }
-          
-          if (settings.is_changing_settings_going_to_fail()) {
-            retry_count++;
-            if (retry_count >= max_retries) {
-              BOOST_LOG(warning) << "已达到最大重试次数，停止尝试恢复显示设置";
-              pending_restore_ = false;
-              clear_vdd_state();
-              return true;
-            }
-            BOOST_LOG(warning) << "Timer: 仍在等待解锁... (Count: " << retry_count << "/" << max_retries << ")";
-            return false;
-          }
+  void
+  session_t::start_polling_restore(revert_reason_e reason) {
+    static int retry_count = 0;
+    retry_count = 0;  // 重置计数器
+    const int max_retries = 20;
 
-          auto result = settings.revert_settings(reason);
-          BOOST_LOG(info) << "尝试恢复显示设置" << (result ? "成功" : "失败") << "，不再重试";
+    timer->setup_timer([this, reason]() {
+      // 检查是否还需要恢复
+      if (!pending_restore_) {
+        BOOST_LOG(debug) << "恢复操作已取消，跳过";
+        return true;
+      }
+      
+      if (settings.is_changing_settings_going_to_fail()) {
+        retry_count++;
+        if (retry_count >= max_retries) {
+          BOOST_LOG(warning) << "已达到最大重试次数，停止尝试恢复显示设置";
           pending_restore_ = false;
           clear_vdd_state();
           return true;
-        });
+        }
+        BOOST_LOG(warning) << "Timer: 仍在等待CCD恢复... (Count: " << retry_count << "/" << max_retries << ")";
+        return false;
       }
-    }
+
+      auto result = settings.revert_settings(reason);
+      BOOST_LOG(info) << "轮询恢复显示设置" << (result ? "成功" : "失败") << "，不再重试";
+      pending_restore_ = false;
+      clear_vdd_state();
+      return true;
+    });
   }
 
   session_t::session_t():

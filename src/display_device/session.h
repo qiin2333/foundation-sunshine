@@ -227,6 +227,13 @@ namespace display_device {
     void
     restore_state_impl(revert_reason_e reason = revert_reason_e::stream_ended);
 
+    /**
+     * @brief Start polling mechanism as fallback when CCD API is temporarily unavailable.
+     * @param reason The reason for reverting settings.
+     */
+    void
+    start_polling_restore(revert_reason_e reason);
+
     settings_t settings; /**< A class for managing display device settings. */
     std::mutex mutex; /**< A mutex for ensuring thread-safety. */
     std::string last_vdd_setting; /**< Last VDD resolution and refresh rate setting. */

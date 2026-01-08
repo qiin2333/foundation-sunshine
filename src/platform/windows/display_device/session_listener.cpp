@@ -1,20 +1,24 @@
 // local includes
 #include "session_listener.h"
+#include "windows_utils.h"
 #include "src/logging.h"
 
-// standard includes
-#include <condition_variable>
+#include <atomic>
 
 namespace display_device {
 
   // Static member initialization
+  std::mutex SessionEventListener::mutex_;
+  SessionEventListener::UnlockCallback SessionEventListener::pending_task_;
+  std::thread SessionEventListener::worker_thread_;
+  std::queue<SessionEventListener::UnlockCallback> SessionEventListener::task_queue_;
+  std::condition_variable SessionEventListener::cv_;
+  bool SessionEventListener::worker_running_ = false;
   HWND SessionEventListener::hidden_window_ = nullptr;
-  SessionEventListener::UnlockCallback SessionEventListener::pending_callback_;
-  std::mutex SessionEventListener::callback_mutex_;
-  bool SessionEventListener::initialized_ = false;
-  bool SessionEventListener::event_based_ = false;
   std::thread SessionEventListener::message_thread_;
-  bool SessionEventListener::thread_running_ = false;
+  std::atomic<bool> SessionEventListener::thread_running_ { false };
+  std::atomic<bool> SessionEventListener::initialized_ { false };
+  std::atomic<bool> SessionEventListener::event_based_ { false };
 
   namespace {
     const wchar_t *WINDOW_CLASS_NAME = L"SunshineSessionListener";
@@ -29,26 +33,28 @@ namespace display_device {
     if (message == WM_WTSSESSION_CHANGE) {
       switch (wparam) {
         case WTS_SESSION_UNLOCK:
-          BOOST_LOG(info) << "检测到会话解锁事件";
           {
-            std::lock_guard<std::mutex> lock(callback_mutex_);
-            if (pending_callback_) {
-              BOOST_LOG(info) << "执行解锁回调";
-              auto callback = std::move(pending_callback_);
-              pending_callback_ = nullptr;
-              // 在新线程中执行回调，避免阻塞消息循环
-              std::thread([callback = std::move(callback)]() {
-                callback();
-              }).detach();
+            BOOST_LOG(info) << "[SessionListener] 检测到会话解锁事件";
+            
+            // 将pending_task_移入队列执行
+            {
+              std::lock_guard<std::mutex> lock(mutex_);
+              if (pending_task_) {
+                BOOST_LOG(info) << "[SessionListener] 执行解锁任务";
+                task_queue_.push(std::move(pending_task_));
+                pending_task_ = nullptr;
+                cv_.notify_one();
+              }
             }
           }
           break;
         case WTS_SESSION_LOCK:
-          BOOST_LOG(debug) << "检测到会话锁定事件";
+          BOOST_LOG(info) << "[SessionListener] 检测到会话锁定事件";
+          break;
+        case WTS_CONSOLE_DISCONNECT:
+          BOOST_LOG(info) << "[SessionListener] 检测到控制台断开事件";
           break;
         default:
-          // 其他事件（远程连接/断开、控制台连接/断开等）不单独处理
-          // RDP断开后会进入锁屏状态，等待 WTS_SESSION_UNLOCK 触发回调
           break;
       }
     }
@@ -60,7 +66,6 @@ namespace display_device {
 
   void
   SessionEventListener::message_loop() {
-    // 在消息线程中创建窗口
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = window_proc;
@@ -70,7 +75,7 @@ namespace display_device {
     if (!RegisterClassExW(&wc)) {
       DWORD last_error = GetLastError();
       if (last_error != ERROR_CLASS_ALREADY_EXISTS) {
-        BOOST_LOG(error) << "注册窗口类失败: " << last_error;
+        BOOST_LOG(error) << "[SessionListener] 注册窗口类失败: " << last_error;
         {
           std::lock_guard<std::mutex> lock(init_mutex_);
           init_complete_ = true;
@@ -81,21 +86,13 @@ namespace display_device {
       }
     }
 
-    // 创建消息窗口
     hidden_window_ = CreateWindowExW(
-      0,
-      WINDOW_CLASS_NAME,
-      L"SunshineSessionListenerWindow",
-      0,
-      0, 0, 0, 0,
-      HWND_MESSAGE,
-      nullptr,
-      GetModuleHandle(nullptr),
-      nullptr
+      0, WINDOW_CLASS_NAME, L"SunshineSessionListenerWindow",
+      0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandle(nullptr), nullptr
     );
 
     if (!hidden_window_) {
-      BOOST_LOG(error) << "创建隐藏窗口失败: " << GetLastError();
+      BOOST_LOG(error) << "[SessionListener] 创建隐藏窗口失败: " << GetLastError();
       {
         std::lock_guard<std::mutex> lock(init_mutex_);
         init_complete_ = true;
@@ -105,9 +102,8 @@ namespace display_device {
       return;
     }
 
-    // 注册会话通知
     if (!WTSRegisterSessionNotification(hidden_window_, NOTIFY_FOR_THIS_SESSION)) {
-      BOOST_LOG(warning) << "注册会话通知失败: " << GetLastError();
+      BOOST_LOG(warning) << "[SessionListener] 注册会话通知失败: " << GetLastError();
       DestroyWindow(hidden_window_);
       hidden_window_ = nullptr;
       {
@@ -119,7 +115,7 @@ namespace display_device {
       return;
     }
 
-    BOOST_LOG(info) << "会话事件监听器初始化成功（事件驱动）";
+    BOOST_LOG(info) << "[SessionListener] 会话事件监听器初始化成功";
     
     {
       std::lock_guard<std::mutex> lock(init_mutex_);
@@ -128,14 +124,12 @@ namespace display_device {
     }
     init_cv_.notify_one();
 
-    // 运行消息循环
     MSG msg;
     while (thread_running_ && GetMessage(&msg, nullptr, 0, 0)) {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
     }
 
-    // 清理
     if (hidden_window_) {
       WTSUnRegisterSessionNotification(hidden_window_);
       DestroyWindow(hidden_window_);
@@ -144,18 +138,61 @@ namespace display_device {
     UnregisterClassW(WINDOW_CLASS_NAME, GetModuleHandle(nullptr));
   }
 
+  void
+  SessionEventListener::worker_loop() {
+    BOOST_LOG(info) << "[SessionListener] Worker线程已启动";
+    
+    while (true) {
+      UnlockCallback task;
+      
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [] { 
+          return !task_queue_.empty() || !worker_running_; 
+        });
+        
+        if (!worker_running_ && task_queue_.empty()) {
+          break;
+        }
+        
+        if (task_queue_.empty()) {
+          continue;
+        }
+        
+        task = std::move(task_queue_.front());
+        task_queue_.pop();
+      }
+      
+      // 在锁外执行任务，避免死锁
+      try {
+        task();
+      }
+      catch (const std::exception& e) {
+        BOOST_LOG(error) << "[SessionListener] 任务执行异常: " << e.what();
+      }
+    }
+    
+    BOOST_LOG(info) << "[SessionListener] Worker线程已退出";
+  }
+
   bool
-  SessionEventListener::init(UnlockCallback on_unlock) {
+  SessionEventListener::init() {
     if (initialized_) {
       return event_based_;
     }
 
-    // 重置初始化状态
     {
       std::lock_guard<std::mutex> lock(init_mutex_);
       init_complete_ = false;
       init_success_ = false;
     }
+
+    // 启动worker线程
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      worker_running_ = true;
+    }
+    worker_thread_ = std::thread(worker_loop);
 
     // 启动消息线程
     thread_running_ = true;
@@ -171,17 +208,11 @@ namespace display_device {
     event_based_ = init_success_;
 
     if (!event_based_) {
-      BOOST_LOG(warning) << "事件监听器初始化失败，将使用轮询机制";
+      BOOST_LOG(warning) << "[SessionListener] 事件监听器初始化失败";
       thread_running_ = false;
       if (message_thread_.joinable()) {
         message_thread_.join();
       }
-    }
-
-    // 保存初始回调
-    if (on_unlock && event_based_) {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      pending_callback_ = std::move(on_unlock);
     }
 
     return event_based_;
@@ -193,26 +224,39 @@ namespace display_device {
       return;
     }
 
-    // 停止消息线程
+    BOOST_LOG(info) << "[SessionListener] 开始清理";
+
     thread_running_ = false;
-    
     if (hidden_window_) {
-      // 发送 WM_QUIT 消息退出消息循环
       PostMessage(hidden_window_, WM_QUIT, 0, 0);
     }
-
     if (message_thread_.joinable()) {
       message_thread_.join();
     }
 
+    // 停止worker线程
     {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      pending_callback_ = nullptr;
+      std::lock_guard<std::mutex> lock(mutex_);
+      worker_running_ = false;
+      cv_.notify_one();
+    }
+
+    if (worker_thread_.joinable()) {
+      worker_thread_.join();
+    }
+
+    // 清理状态
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      pending_task_ = nullptr;
+      while (!task_queue_.empty()) {
+        task_queue_.pop();
+      }
     }
 
     initialized_ = false;
     event_based_ = false;
-    BOOST_LOG(info) << "会话事件监听器已清理";
+    BOOST_LOG(info) << "[SessionListener] 清理完成";
   }
 
   bool
@@ -221,17 +265,32 @@ namespace display_device {
   }
 
   void
-  SessionEventListener::register_unlock_callback(UnlockCallback callback) {
-    std::lock_guard<std::mutex> lock(callback_mutex_);
-    pending_callback_ = std::move(callback);
-    BOOST_LOG(debug) << "已注册解锁回调";
+  SessionEventListener::add_unlock_task(UnlockCallback task) {
+    if (!task) {
+      return;
+    }
+    
+    const bool is_locked = w_utils::is_user_session_locked();
+    
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (!is_locked) {
+      // 未锁定：直接提交到队列执行
+      BOOST_LOG(info) << "[SessionListener] 当前未锁定，立即执行任务";
+      task_queue_.push(std::move(task));
+      cv_.notify_one();
+    }
+    else {
+      // 锁定中：保存任务等待解锁
+      BOOST_LOG(info) << "[SessionListener] 任务已加入解锁队列";
+      pending_task_ = std::move(task);
+    }
   }
 
   void
-  SessionEventListener::clear_unlock_callback() {
-    std::lock_guard<std::mutex> lock(callback_mutex_);
-    pending_callback_ = nullptr;
-    BOOST_LOG(debug) << "已清除解锁回调";
+  SessionEventListener::clear_unlock_task() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_task_ = nullptr;
   }
 
 }  // namespace display_device

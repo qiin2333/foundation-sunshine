@@ -304,10 +304,16 @@ namespace display_device {
         BOOST_LOG(error) << "销毁虚拟显示器失败";
         return false;
       }
+      
+      BOOST_LOG(info) << "销毁虚拟显示器完成，响应: " << response;
+      
+      // 等待驱动程序完全卸载，避免WUDFHost.exe崩溃
+      // 这是必要的，因为驱动程序卸载是异步的
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
       system_tray::update_vdd_menu();
 #endif
-      BOOST_LOG(info) << "销毁虚拟显示器完成，响应: " << response;
       return true;
     }
 
