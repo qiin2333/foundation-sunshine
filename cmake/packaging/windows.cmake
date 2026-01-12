@@ -45,6 +45,9 @@ install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/firewall/"
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/gamepad/"
         DESTINATION "scripts"
         COMPONENT gamepad)
+install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/vsink/"
+        DESTINATION "scripts"
+        COMPONENT vsink)
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/vdd/"
         DESTINATION "scripts"
         COMPONENT vdd)
