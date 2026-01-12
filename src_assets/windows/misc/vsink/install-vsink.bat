@@ -8,8 +8,8 @@ if %errorLevel% neq 0 (
 )
 
 :: Check if VB-Cable driver is already installed
-:: Method 1: Check registry for VB-Cable specific key (more reliable)
-reg query "HKLM\SOFTWARE\VB-Audio\Cable" >nul 2>&1
+:: Use PowerShell to check registry (more reliable, doesn't depend on PATH)
+powershell -Command "try { $key = Get-ItemProperty -Path 'HKLM:\SOFTWARE\VB-Audio\Cable' -ErrorAction SilentlyContinue; if ($key) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if %errorLevel% equ 0 (
     echo VB-Cable driver is already installed (detected via registry)
     pause
@@ -25,15 +25,12 @@ if %errorLevel% equ 0 (
     exit /b
 )
 
-:: Method 3: Check audio devices via registry (additional fallback)
-reg query "HKLM\SYSTEM\CurrentControlSet\Enum\SWD\MMDEVAPI" >nul 2>&1
+:: Method 3: Check audio devices via registry using PowerShell (additional fallback)
+powershell -Command "try { $devices = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Enum\SWD\MMDEVAPI\*' -ErrorAction SilentlyContinue | Where-Object {$_.FriendlyName -like '*CABLE*' -or $_.FriendlyName -like '*VB-Cable*'}; if ($devices) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if %errorLevel% equ 0 (
-    reg query "HKLM\SYSTEM\CurrentControlSet\Enum\SWD\MMDEVAPI" /s /f "CABLE" >nul 2>&1
-    if %errorLevel% equ 0 (
-        echo VB-Cable driver is already installed (detected via device registry)
-        pause
-        exit /b
-    )
+    echo VB-Cable driver is already installed (detected via device registry)
+    pause
+    exit /b
 )
 
 :: Set variables
