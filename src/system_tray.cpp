@@ -187,30 +187,6 @@ namespace system_tray {
     return !vdd_device_id.empty();
   }
 
-  // 保存 vdd_keep_enabled 到配置文件
-  static void save_vdd_keep_enabled() {
-    try {
-      std::string config_content = file_handler::read_file(config::sunshine.config_file.c_str());
-      std::stringstream new_config;
-      
-      std::istringstream iss(config_content);
-      std::string line;
-      while (std::getline(iss, line)) {
-        if (line.find("vdd_keep_enabled") != std::string::npos) {
-          continue;  // 跳过已有的行
-        }
-        new_config << line << "\n";
-      }
-      new_config << "vdd_keep_enabled = " << (config::video.vdd_keep_enabled ? "true" : "false") << "\n";
-      
-      file_handler::write_file(config::sunshine.config_file.c_str(), new_config.str());
-      BOOST_LOG(info) << "Saved vdd_keep_enabled = " << config::video.vdd_keep_enabled;
-    }
-    catch (const std::exception &e) {
-      BOOST_LOG(error) << "Failed to save vdd_keep_enabled: " << e.what();
-    }
-  }
-
   // 更新 VDD 菜单项的文本和状态
   static void update_vdd_menu_text() {
     bool vdd_active = is_vdd_active();
@@ -288,7 +264,7 @@ namespace system_tray {
     }
     
     // 保存配置到文件
-    save_vdd_keep_enabled();
+    config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
     
     update_vdd_menu_text();
     tray_update(&tray);
@@ -966,24 +942,7 @@ namespace system_tray {
     system_tray_i18n::set_tray_locale(locale);
 
     // 保存到配置文件
-    try {
-      auto vars = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
-      std::stringstream configStream;
-
-      // 更新或添加 tray_locale 配置项
-      vars["tray_locale"] = locale;
-      for (const auto &[key, value] : vars) {
-        if (!value.empty() && value != "null") {
-          configStream << key << " = " << value << std::endl;
-        }
-      }
-
-      file_handler::write_file(config::sunshine.config_file.c_str(), configStream.str());
-      BOOST_LOG(info) << "Tray language setting saved to config file"sv;
-    }
-    catch (std::exception &e) {
-      BOOST_LOG(warning) << "Failed to save tray language setting: "sv << e.what();
-    }
+    config::update_config({{"tray_locale", locale}});
 
     update_menu_texts();
     tray_update(&tray);
