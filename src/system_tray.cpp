@@ -118,6 +118,13 @@ namespace system_tray {
     advanced_settings_submenu[5].text = s_reset_display_device_config.c_str();
   }
 
+  // 更新 VDD 子菜单项的文本
+  static void update_vdd_submenu_text() {
+    vdd_submenu[0].text = s_vdd_create.c_str();
+    vdd_submenu[1].text = s_vdd_close.c_str();
+    vdd_submenu[2].text = s_vdd_persistent.c_str();
+  }
+
   // 更新访问项目地址子菜单项的文本
   static void tray_visit_project_submenu_text() {
     visit_project_submenu[0].text = s_visit_project_sunshine.c_str();
@@ -156,6 +163,7 @@ namespace system_tray {
     init_localized_strings();
     tray_menus[0].text = s_open_sunshine.c_str();
     tray_menus[2].text = s_vdd_base_display.c_str();
+    update_vdd_submenu_text();  // 更新 VDD 子菜单文本
   #ifdef _WIN32
     tray_menus[3].text = s_advanced_settings.c_str();
     update_advanced_settings_menu_text();
