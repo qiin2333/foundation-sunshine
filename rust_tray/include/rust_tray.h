@@ -15,20 +15,27 @@ extern "C" {
  */
 typedef enum {
     TRAY_ACTION_OPEN_UI = 1,
-    TRAY_ACTION_TOGGLE_VDD_MONITOR = 2,
-    TRAY_ACTION_IMPORT_CONFIG = 3,
-    TRAY_ACTION_EXPORT_CONFIG = 4,
-    TRAY_ACTION_RESET_CONFIG = 5,
-    TRAY_ACTION_LANGUAGE_CHINESE = 6,
-    TRAY_ACTION_LANGUAGE_ENGLISH = 7,
-    TRAY_ACTION_LANGUAGE_JAPANESE = 8,
-    TRAY_ACTION_STAR_PROJECT = 9,
-    TRAY_ACTION_DONATE_YUNDI339 = 10,
-    TRAY_ACTION_DONATE_QIIN = 11,
-    TRAY_ACTION_RESET_DISPLAY_DEVICE_CONFIG = 12,
-    TRAY_ACTION_RESTART = 13,
-    TRAY_ACTION_QUIT = 14,
-    TRAY_ACTION_NOTIFICATION_CLICKED = 15,
+    // VDD submenu actions
+    TRAY_ACTION_VDD_CREATE = 2,
+    TRAY_ACTION_VDD_CLOSE = 3,
+    TRAY_ACTION_VDD_PERSISTENT = 4,
+    // Config actions
+    TRAY_ACTION_IMPORT_CONFIG = 5,
+    TRAY_ACTION_EXPORT_CONFIG = 6,
+    TRAY_ACTION_RESET_CONFIG = 7,
+    TRAY_ACTION_CLOSE_APP = 8,
+    // Language actions
+    TRAY_ACTION_LANGUAGE_CHINESE = 9,
+    TRAY_ACTION_LANGUAGE_ENGLISH = 10,
+    TRAY_ACTION_LANGUAGE_JAPANESE = 11,
+    TRAY_ACTION_STAR_PROJECT = 12,
+    // Visit Project actions
+    TRAY_ACTION_VISIT_PROJECT_SUNSHINE = 13,
+    TRAY_ACTION_VISIT_PROJECT_MOONLIGHT = 14,
+    TRAY_ACTION_RESET_DISPLAY_DEVICE_CONFIG = 15,
+    TRAY_ACTION_RESTART = 16,
+    TRAY_ACTION_QUIT = 17,
+    TRAY_ACTION_NOTIFICATION_CLICKED = 18,
 } TrayAction;
 
 /**
@@ -95,16 +102,24 @@ void tray_set_icon(int icon_type);
 void tray_set_tooltip(const char* tooltip);
 
 /**
- * @brief Update the VDD monitor toggle checkbox state
- * @param checked Non-zero to check, zero to uncheck
- */
-void tray_set_vdd_checked(int checked);
-
-/**
- * @brief Set the VDD toggle menu item enabled state
+ * @brief Update the VDD create menu item state
+ * @param checked Non-zero to check (VDD is active), zero to uncheck
  * @param enabled Non-zero to enable, zero to disable
  */
-void tray_set_vdd_enabled(int enabled);
+void tray_set_vdd_create_state(int checked, int enabled);
+
+/**
+ * @brief Update the VDD close menu item state
+ * @param checked Non-zero to check (VDD is not active), zero to uncheck
+ * @param enabled Non-zero to enable, zero to disable
+ */
+void tray_set_vdd_close_state(int checked, int enabled);
+
+/**
+ * @brief Update the VDD persistent menu item state
+ * @param checked Non-zero to check (persistent mode enabled), zero to uncheck
+ */
+void tray_set_vdd_persistent_state(int checked);
 
 /**
  * @brief Set the current locale

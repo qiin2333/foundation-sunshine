@@ -11,20 +11,27 @@ use once_cell::sync::Lazy;
 #[repr(u32)]
 pub enum MenuAction {
     OpenUI = 1,
-    ToggleVddMonitor = 2,
-    ImportConfig = 3,
-    ExportConfig = 4,
-    ResetConfig = 5,
-    LanguageChinese = 6,
-    LanguageEnglish = 7,
-    LanguageJapanese = 8,
-    StarProject = 9,
-    DonateYundi339 = 10,
-    DonateQiin = 11,
-    ResetDisplayDeviceConfig = 12,
-    Restart = 13,
-    Quit = 14,
-    NotificationClicked = 15,
+    // VDD submenu actions
+    VddCreate = 2,
+    VddClose = 3,
+    VddPersistent = 4,
+    // Config actions
+    ImportConfig = 5,
+    ExportConfig = 6,
+    ResetConfig = 7,
+    CloseApp = 8,
+    // Language actions
+    LanguageChinese = 9,
+    LanguageEnglish = 10,
+    LanguageJapanese = 11,
+    StarProject = 12,
+    // Visit Project actions
+    VisitProjectSunshine = 13,
+    VisitProjectMoonlight = 14,
+    ResetDisplayDeviceConfig = 15,
+    Restart = 16,
+    Quit = 17,
+    NotificationClicked = 18,
 }
 
 impl TryFrom<u32> for MenuAction {
@@ -33,20 +40,23 @@ impl TryFrom<u32> for MenuAction {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(MenuAction::OpenUI),
-            2 => Ok(MenuAction::ToggleVddMonitor),
-            3 => Ok(MenuAction::ImportConfig),
-            4 => Ok(MenuAction::ExportConfig),
-            5 => Ok(MenuAction::ResetConfig),
-            6 => Ok(MenuAction::LanguageChinese),
-            7 => Ok(MenuAction::LanguageEnglish),
-            8 => Ok(MenuAction::LanguageJapanese),
-            9 => Ok(MenuAction::StarProject),
-            10 => Ok(MenuAction::DonateYundi339),
-            11 => Ok(MenuAction::DonateQiin),
-            12 => Ok(MenuAction::ResetDisplayDeviceConfig),
-            13 => Ok(MenuAction::Restart),
-            14 => Ok(MenuAction::Quit),
-            15 => Ok(MenuAction::NotificationClicked),
+            2 => Ok(MenuAction::VddCreate),
+            3 => Ok(MenuAction::VddClose),
+            4 => Ok(MenuAction::VddPersistent),
+            5 => Ok(MenuAction::ImportConfig),
+            6 => Ok(MenuAction::ExportConfig),
+            7 => Ok(MenuAction::ResetConfig),
+            8 => Ok(MenuAction::CloseApp),
+            9 => Ok(MenuAction::LanguageChinese),
+            10 => Ok(MenuAction::LanguageEnglish),
+            11 => Ok(MenuAction::LanguageJapanese),
+            12 => Ok(MenuAction::StarProject),
+            13 => Ok(MenuAction::VisitProjectSunshine),
+            14 => Ok(MenuAction::VisitProjectMoonlight),
+            15 => Ok(MenuAction::ResetDisplayDeviceConfig),
+            16 => Ok(MenuAction::Restart),
+            17 => Ok(MenuAction::Quit),
+            18 => Ok(MenuAction::NotificationClicked),
             _ => Err(()),
         }
     }
@@ -72,9 +82,9 @@ pub fn trigger_action(action: MenuAction) {
 
 /// URLs for opening in browser
 pub mod urls {
-    pub const GITHUB_PROJECT: &str = "https://github.com/qiin2333/Sunshine-Foundation";
-    pub const DONATE_YUNDI339: &str = "https://www.ifdian.net/a/Yundi339";
-    pub const DONATE_QIIN: &str = "https://www.ifdian.net/a/qiin2333";
+    pub const GITHUB_PROJECT: &str = "https://sunshine-foundation.vercel.app/";
+    pub const PROJECT_SUNSHINE: &str = "https://github.com/qiin2333/Sunshine-Foundation";
+    pub const PROJECT_MOONLIGHT: &str = "https://github.com/qiin2333/moonlight-vplus";
 }
 
 /// Open URL in default browser

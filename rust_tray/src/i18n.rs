@@ -35,20 +35,34 @@ impl From<&str> for Locale {
 pub enum StringKey {
     // Menu items
     OpenSunshine,
-    VddMonitorToggle,
-    Configuration,
+    // VDD submenu
+    VddBaseDisplay,
+    VddCreate,
+    VddClose,
+    VddPersistent,
+    VddPersistentConfirmTitle,
+    VddPersistentConfirmMsg,
+    // Advanced Settings submenu
+    AdvancedSettings,
     ImportConfig,
     ExportConfig,
     ResetToDefault,
+    CloseApp,
+    CloseAppConfirmTitle,
+    CloseAppConfirmMsg,
+    // Language submenu
     Language,
     Chinese,
     English,
     Japanese,
     StarProject,
-    HelpUs,
-    DeveloperYundi339,
-    DeveloperQiin,
+    // Visit Project submenu
+    VisitProject,
+    VisitProjectSunshine,
+    VisitProjectMoonlight,
     ResetDisplayDeviceConfig,
+    ResetDisplayConfirmTitle,
+    ResetDisplayConfirmMsg,
     Restart,
     Quit,
     
@@ -101,20 +115,32 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     
     // English translations
     m.insert((Locale::English, StringKey::OpenSunshine), "Open Sunshine");
-    m.insert((Locale::English, StringKey::VddMonitorToggle), "VDD Monitor Toggle");
-    m.insert((Locale::English, StringKey::Configuration), "Configuration");
+    // VDD submenu
+    m.insert((Locale::English, StringKey::VddBaseDisplay), "Foundation Display");
+    m.insert((Locale::English, StringKey::VddCreate), "Create");
+    m.insert((Locale::English, StringKey::VddClose), "Close");
+    m.insert((Locale::English, StringKey::VddPersistent), "Keep Enabled");
+    m.insert((Locale::English, StringKey::VddPersistentConfirmTitle), "Enable Keep VDD Mode");
+    m.insert((Locale::English, StringKey::VddPersistentConfirmMsg), "Enabling this mode will keep the virtual display active at all times.\n\nAre you sure you want to enable it?");
+    // Advanced Settings submenu
+    m.insert((Locale::English, StringKey::AdvancedSettings), "Advanced Settings");
     m.insert((Locale::English, StringKey::ImportConfig), "Import Config");
     m.insert((Locale::English, StringKey::ExportConfig), "Export Config");
     m.insert((Locale::English, StringKey::ResetToDefault), "Reset to Default");
+    m.insert((Locale::English, StringKey::CloseApp), "Clear Cache");
+    m.insert((Locale::English, StringKey::CloseAppConfirmTitle), "Clear Cache");
+    m.insert((Locale::English, StringKey::CloseAppConfirmMsg), "This will terminate the current streaming application.\n\nAre you sure you want to continue?");
     m.insert((Locale::English, StringKey::Language), "Language");
     m.insert((Locale::English, StringKey::Chinese), "中文");
     m.insert((Locale::English, StringKey::English), "English");
     m.insert((Locale::English, StringKey::Japanese), "日本語");
     m.insert((Locale::English, StringKey::StarProject), "Star Project");
-    m.insert((Locale::English, StringKey::HelpUs), "Sponsor Us");
-    m.insert((Locale::English, StringKey::DeveloperYundi339), "Developer: Yundi339");
-    m.insert((Locale::English, StringKey::DeveloperQiin), "Developer: Qiin");
+    m.insert((Locale::English, StringKey::VisitProject), "Visit Project");
+    m.insert((Locale::English, StringKey::VisitProjectSunshine), "Sunshine-Foundation");
+    m.insert((Locale::English, StringKey::VisitProjectMoonlight), "Moonlight-vplus");
     m.insert((Locale::English, StringKey::ResetDisplayDeviceConfig), "Reset Display Memory");
+    m.insert((Locale::English, StringKey::ResetDisplayConfirmTitle), "Reset Display Configuration");
+    m.insert((Locale::English, StringKey::ResetDisplayConfirmMsg), "This will reset all display device configuration.\n\nAre you sure you want to continue?");
     m.insert((Locale::English, StringKey::Restart), "Restart");
     m.insert((Locale::English, StringKey::Quit), "Quit");
     m.insert((Locale::English, StringKey::StreamStarted), "Stream Started");
@@ -155,20 +181,32 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
 
     // Chinese translations
     m.insert((Locale::Chinese, StringKey::OpenSunshine), "打开 Sunshine");
-    m.insert((Locale::Chinese, StringKey::VddMonitorToggle), "虚拟显示器切换");
-    m.insert((Locale::Chinese, StringKey::Configuration), "配置");
+    // VDD submenu
+    m.insert((Locale::Chinese, StringKey::VddBaseDisplay), "基地显示器");
+    m.insert((Locale::Chinese, StringKey::VddCreate), "创建");
+    m.insert((Locale::Chinese, StringKey::VddClose), "关闭");
+    m.insert((Locale::Chinese, StringKey::VddPersistent), "保持启用");
+    m.insert((Locale::Chinese, StringKey::VddPersistentConfirmTitle), "启用保持虚拟显示器模式");
+    m.insert((Locale::Chinese, StringKey::VddPersistentConfirmMsg), "启用此模式将使虚拟显示器始终保持活动状态。\n\n确定要启用吗？");
+    // Advanced Settings submenu
+    m.insert((Locale::Chinese, StringKey::AdvancedSettings), "高级设置");
     m.insert((Locale::Chinese, StringKey::ImportConfig), "导入配置");
     m.insert((Locale::Chinese, StringKey::ExportConfig), "导出配置");
     m.insert((Locale::Chinese, StringKey::ResetToDefault), "恢复默认");
+    m.insert((Locale::Chinese, StringKey::CloseApp), "清理应用缓存");
+    m.insert((Locale::Chinese, StringKey::CloseAppConfirmTitle), "清理应用缓存");
+    m.insert((Locale::Chinese, StringKey::CloseAppConfirmMsg), "这将终止当前正在串流的应用程序。\n\n确定要继续吗？");
     m.insert((Locale::Chinese, StringKey::Language), "语言");
     m.insert((Locale::Chinese, StringKey::Chinese), "中文");
     m.insert((Locale::Chinese, StringKey::English), "English");
     m.insert((Locale::Chinese, StringKey::Japanese), "日本語");
     m.insert((Locale::Chinese, StringKey::StarProject), "Star项目");
-    m.insert((Locale::Chinese, StringKey::HelpUs), "赞助我们");
-    m.insert((Locale::Chinese, StringKey::DeveloperYundi339), "开发者：Yundi339");
-    m.insert((Locale::Chinese, StringKey::DeveloperQiin), "开发者：Qiin");
+    m.insert((Locale::Chinese, StringKey::VisitProject), "访问项目");
+    m.insert((Locale::Chinese, StringKey::VisitProjectSunshine), "Sunshine-Foundation");
+    m.insert((Locale::Chinese, StringKey::VisitProjectMoonlight), "Moonlight-vplus");
     m.insert((Locale::Chinese, StringKey::ResetDisplayDeviceConfig), "重置显示器记忆");
+    m.insert((Locale::Chinese, StringKey::ResetDisplayConfirmTitle), "重置显示器配置");
+    m.insert((Locale::Chinese, StringKey::ResetDisplayConfirmMsg), "这将重置所有显示器设备配置。\n\n确定要继续吗？");
     m.insert((Locale::Chinese, StringKey::Restart), "重新启动");
     m.insert((Locale::Chinese, StringKey::Quit), "退出");
     m.insert((Locale::Chinese, StringKey::StreamStarted), "串流已开始");
@@ -209,20 +247,32 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
 
     // Japanese translations
     m.insert((Locale::Japanese, StringKey::OpenSunshine), "Sunshineを開く");
-    m.insert((Locale::Japanese, StringKey::VddMonitorToggle), "仮想ディスプレイの切り替え");
-    m.insert((Locale::Japanese, StringKey::Configuration), "設定");
+    // VDD submenu
+    m.insert((Locale::Japanese, StringKey::VddBaseDisplay), "仮想ディスプレイ");
+    m.insert((Locale::Japanese, StringKey::VddCreate), "作成");
+    m.insert((Locale::Japanese, StringKey::VddClose), "閉じる");
+    m.insert((Locale::Japanese, StringKey::VddPersistent), "常時有効");
+    m.insert((Locale::Japanese, StringKey::VddPersistentConfirmTitle), "仮想ディスプレイの常時有効モード");
+    m.insert((Locale::Japanese, StringKey::VddPersistentConfirmMsg), "このモードを有効にすると、仮想ディスプレイは常にアクティブな状態を維持します。\n\n有効にしますか？");
+    // Advanced Settings submenu
+    m.insert((Locale::Japanese, StringKey::AdvancedSettings), "詳細設定");
     m.insert((Locale::Japanese, StringKey::ImportConfig), "設定をインポート");
     m.insert((Locale::Japanese, StringKey::ExportConfig), "設定をエクスポート");
     m.insert((Locale::Japanese, StringKey::ResetToDefault), "デフォルトに戻す");
+    m.insert((Locale::Japanese, StringKey::CloseApp), "キャッシュをクリア");
+    m.insert((Locale::Japanese, StringKey::CloseAppConfirmTitle), "キャッシュをクリア");
+    m.insert((Locale::Japanese, StringKey::CloseAppConfirmMsg), "現在ストリーミング中のアプリケーションを終了します。\n\n続行しますか？");
     m.insert((Locale::Japanese, StringKey::Language), "言語");
     m.insert((Locale::Japanese, StringKey::Chinese), "中文");
     m.insert((Locale::Japanese, StringKey::English), "English");
     m.insert((Locale::Japanese, StringKey::Japanese), "日本語");
     m.insert((Locale::Japanese, StringKey::StarProject), "スターを付ける");
-    m.insert((Locale::Japanese, StringKey::HelpUs), "スポンサー");
-    m.insert((Locale::Japanese, StringKey::DeveloperYundi339), "開発者：Yundi339");
-    m.insert((Locale::Japanese, StringKey::DeveloperQiin), "開発者：Qiin");
+    m.insert((Locale::Japanese, StringKey::VisitProject), "プロジェクトを訪問");
+    m.insert((Locale::Japanese, StringKey::VisitProjectSunshine), "Sunshine-Foundation");
+    m.insert((Locale::Japanese, StringKey::VisitProjectMoonlight), "Moonlight-vplus");
     m.insert((Locale::Japanese, StringKey::ResetDisplayDeviceConfig), "ディスプレイメモリをリセット");
+    m.insert((Locale::Japanese, StringKey::ResetDisplayConfirmTitle), "ディスプレイ設定をリセット");
+    m.insert((Locale::Japanese, StringKey::ResetDisplayConfirmMsg), "すべてのディスプレイデバイス設定をリセットします。\n\n続行しますか？");
     m.insert((Locale::Japanese, StringKey::Restart), "再起動");
     m.insert((Locale::Japanese, StringKey::Quit), "終了");
     m.insert((Locale::Japanese, StringKey::StreamStarted), "ストリーム開始");

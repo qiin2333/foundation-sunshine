@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(target_os = "windows"))]
 use image::ImageReader;
-use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem};
+use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -43,30 +43,36 @@ use std::sync::atomic::AtomicI32;
 struct TrayState {
     icon: TrayIcon,
     menu: Menu,
-    // Menu item IDs for dynamic updates
-    vdd_toggle_id: MenuId,
-    // Submenu references for language
-    config_submenu: Submenu,
+    // Submenu references
+    vdd_submenu: Submenu,
+    advanced_settings_submenu: Submenu,
     language_submenu: Submenu,
-    help_submenu: Submenu,
+    visit_project_submenu: Submenu,
     // All menu items for rebuilding
     menu_items: MenuItems,
 }
 
 struct MenuItems {
     open_sunshine: MenuItem,
-    vdd_toggle: CheckMenuItem,
+    // VDD submenu items
+    vdd_create: CheckMenuItem,
+    vdd_close: CheckMenuItem,
+    vdd_persistent: CheckMenuItem,
+    // Advanced Settings submenu items
     import_config: MenuItem,
     export_config: MenuItem,
     reset_config: MenuItem,
+    close_app: MenuItem,
+    #[cfg(target_os = "windows")]
+    reset_display: MenuItem,
+    // Language submenu items
     lang_chinese: MenuItem,
     lang_english: MenuItem,
     lang_japanese: MenuItem,
+    // Other items
     star_project: MenuItem,
-    donate_yundi339: MenuItem,
-    donate_qiin: MenuItem,
-    #[cfg(target_os = "windows")]
-    reset_display: MenuItem,
+    visit_sunshine: MenuItem,
+    visit_moonlight: MenuItem,
     restart: MenuItem,
     quit: MenuItem,
 }
@@ -271,7 +277,7 @@ fn load_icon(icon_str: &str) -> Option<Icon> {
 }
 
 /// Build the tray menu with current language
-fn build_menu() -> (Menu, MenuItems, Submenu, Submenu, Submenu, MenuId) {
+fn build_menu() -> (Menu, MenuItems, Submenu, Submenu, Submenu, Submenu) {
     let menu = Menu::new();
     
     // Open Sunshine
@@ -281,24 +287,39 @@ fn build_menu() -> (Menu, MenuItems, Submenu, Submenu, Submenu, MenuId) {
     // Separator
     let _ = menu.append(&PredefinedMenuItem::separator());
     
-    // VDD Monitor Toggle (checkbox)
-    let vdd_toggle = CheckMenuItem::new(get_string(StringKey::VddMonitorToggle), true, false, None);
-    let vdd_toggle_id = vdd_toggle.id().clone();
-    let _ = menu.append(&vdd_toggle);
+    // VDD submenu (Windows only, but we keep it for structure consistency)
+    let vdd_create = CheckMenuItem::new(get_string(StringKey::VddCreate), true, false, None);
+    let vdd_close = CheckMenuItem::new(get_string(StringKey::VddClose), true, false, None);
+    let vdd_persistent = CheckMenuItem::new(get_string(StringKey::VddPersistent), true, false, None);
     
-    // Separator
-    let _ = menu.append(&PredefinedMenuItem::separator());
+    let vdd_submenu = Submenu::new(get_string(StringKey::VddBaseDisplay), true);
+    let _ = vdd_submenu.append(&vdd_create);
+    let _ = vdd_submenu.append(&vdd_close);
+    let _ = vdd_submenu.append(&vdd_persistent);
     
-    // Configuration submenu
+    #[cfg(target_os = "windows")]
+    let _ = menu.append(&vdd_submenu);
+    
+    // Advanced Settings submenu (Windows only)
     let import_config = MenuItem::new(get_string(StringKey::ImportConfig), true, None);
     let export_config = MenuItem::new(get_string(StringKey::ExportConfig), true, None);
     let reset_config = MenuItem::new(get_string(StringKey::ResetToDefault), true, None);
+    let close_app = MenuItem::new(get_string(StringKey::CloseApp), true, None);
     
-    let config_submenu = Submenu::new(get_string(StringKey::Configuration), true);
-    let _ = config_submenu.append(&import_config);
-    let _ = config_submenu.append(&export_config);
-    let _ = config_submenu.append(&reset_config);
-    let _ = menu.append(&config_submenu);
+    #[cfg(target_os = "windows")]
+    let reset_display = MenuItem::new(get_string(StringKey::ResetDisplayDeviceConfig), true, None);
+    
+    let advanced_settings_submenu = Submenu::new(get_string(StringKey::AdvancedSettings), true);
+    let _ = advanced_settings_submenu.append(&import_config);
+    let _ = advanced_settings_submenu.append(&export_config);
+    let _ = advanced_settings_submenu.append(&reset_config);
+    let _ = advanced_settings_submenu.append(&PredefinedMenuItem::separator());
+    let _ = advanced_settings_submenu.append(&close_app);
+    #[cfg(target_os = "windows")]
+    let _ = advanced_settings_submenu.append(&reset_display);
+    
+    #[cfg(target_os = "windows")]
+    let _ = menu.append(&advanced_settings_submenu);
     
     // Separator
     let _ = menu.append(&PredefinedMenuItem::separator());
@@ -321,25 +342,17 @@ fn build_menu() -> (Menu, MenuItems, Submenu, Submenu, Submenu, MenuId) {
     let star_project = MenuItem::new(get_string(StringKey::StarProject), true, None);
     let _ = menu.append(&star_project);
     
-    // Help Us submenu
-    let donate_yundi339 = MenuItem::new(get_string(StringKey::DeveloperYundi339), true, None);
-    let donate_qiin = MenuItem::new(get_string(StringKey::DeveloperQiin), true, None);
+    // Visit Project submenu
+    let visit_sunshine = MenuItem::new(get_string(StringKey::VisitProjectSunshine), true, None);
+    let visit_moonlight = MenuItem::new(get_string(StringKey::VisitProjectMoonlight), true, None);
     
-    let help_submenu = Submenu::new(get_string(StringKey::HelpUs), true);
-    let _ = help_submenu.append(&donate_yundi339);
-    let _ = help_submenu.append(&donate_qiin);
-    let _ = menu.append(&help_submenu);
+    let visit_project_submenu = Submenu::new(get_string(StringKey::VisitProject), true);
+    let _ = visit_project_submenu.append(&visit_sunshine);
+    let _ = visit_project_submenu.append(&visit_moonlight);
+    let _ = menu.append(&visit_project_submenu);
     
     // Separator
     let _ = menu.append(&PredefinedMenuItem::separator());
-    
-    // Windows-specific: Reset Display Device Config
-    #[cfg(target_os = "windows")]
-    let reset_display = {
-        let item = MenuItem::new(get_string(StringKey::ResetDisplayDeviceConfig), true, None);
-        let _ = menu.append(&item);
-        item
-    };
     
     // Restart
     let restart = MenuItem::new(get_string(StringKey::Restart), true, None);
@@ -351,23 +364,26 @@ fn build_menu() -> (Menu, MenuItems, Submenu, Submenu, Submenu, MenuId) {
     
     let menu_items = MenuItems {
         open_sunshine,
-        vdd_toggle,
+        vdd_create,
+        vdd_close,
+        vdd_persistent,
         import_config,
         export_config,
         reset_config,
+        close_app,
+        #[cfg(target_os = "windows")]
+        reset_display,
         lang_chinese,
         lang_english,
         lang_japanese,
         star_project,
-        donate_yundi339,
-        donate_qiin,
-        #[cfg(target_os = "windows")]
-        reset_display,
+        visit_sunshine,
+        visit_moonlight,
         restart,
         quit,
     };
     
-    (menu, menu_items, config_submenu, language_submenu, help_submenu, vdd_toggle_id)
+    (menu, menu_items, vdd_submenu, advanced_settings_submenu, language_submenu, visit_project_submenu)
 }
 
 /// Identify which action corresponds to the menu event
@@ -377,14 +393,20 @@ fn identify_menu_action(event: &MenuEvent, state: &TrayState) -> (Option<MenuAct
     
     if event.id == items.open_sunshine.id() {
         (Some(MenuAction::OpenUI), false)
-    } else if event.id == items.vdd_toggle.id() {
-        (Some(MenuAction::ToggleVddMonitor), false)
+    } else if event.id == items.vdd_create.id() {
+        (Some(MenuAction::VddCreate), false)
+    } else if event.id == items.vdd_close.id() {
+        (Some(MenuAction::VddClose), false)
+    } else if event.id == items.vdd_persistent.id() {
+        (Some(MenuAction::VddPersistent), false)
     } else if event.id == items.import_config.id() {
         (Some(MenuAction::ImportConfig), false)
     } else if event.id == items.export_config.id() {
         (Some(MenuAction::ExportConfig), false)
     } else if event.id == items.reset_config.id() {
         (Some(MenuAction::ResetConfig), false)
+    } else if event.id == items.close_app.id() {
+        (Some(MenuAction::CloseApp), false)
     } else if event.id == items.lang_chinese.id() {
         (Some(MenuAction::LanguageChinese), true)
     } else if event.id == items.lang_english.id() {
@@ -393,10 +415,10 @@ fn identify_menu_action(event: &MenuEvent, state: &TrayState) -> (Option<MenuAct
         (Some(MenuAction::LanguageJapanese), true)
     } else if event.id == items.star_project.id() {
         (Some(MenuAction::StarProject), false)
-    } else if event.id == items.donate_yundi339.id() {
-        (Some(MenuAction::DonateYundi339), false)
-    } else if event.id == items.donate_qiin.id() {
-        (Some(MenuAction::DonateQiin), false)
+    } else if event.id == items.visit_sunshine.id() {
+        (Some(MenuAction::VisitProjectSunshine), false)
+    } else if event.id == items.visit_moonlight.id() {
+        (Some(MenuAction::VisitProjectMoonlight), false)
     } else if event.id == items.restart.id() {
         (Some(MenuAction::Restart), false)
     } else if event.id == items.quit.id() {
@@ -496,16 +518,17 @@ fn execute_action(action: MenuAction, needs_menu_rebuild: bool) {
             open_url(urls::GITHUB_PROJECT);
             trigger_action(action);
         }
-        MenuAction::DonateYundi339 => {
-            open_url(urls::DONATE_YUNDI339);
+        MenuAction::VisitProjectSunshine => {
+            open_url(urls::PROJECT_SUNSHINE);
             trigger_action(action);
         }
-        MenuAction::DonateQiin => {
-            open_url(urls::DONATE_QIIN);
+        MenuAction::VisitProjectMoonlight => {
+            open_url(urls::PROJECT_MOONLIGHT);
             trigger_action(action);
         }
         _ => {
-            // For all other actions, just trigger the callback
+            // For all other actions (VddCreate, VddClose, VddPersistent, CloseApp, ResetDisplayDeviceConfig, Restart, Quit), 
+            // just trigger the callback to let C++ handle them
             trigger_action(action);
         }
     }
@@ -544,14 +567,22 @@ fn update_menu_texts() {
     if let Some(state_mutex) = TRAY_STATE.get() {
         let mut state_guard = state_mutex.lock();
         if let Some(ref mut state) = *state_guard {
-            // Get the current VDD toggle state before rebuilding
-            let vdd_checked = state.menu_items.vdd_toggle.is_checked();
+            // Get the current VDD states before rebuilding
+            let vdd_create_checked = state.menu_items.vdd_create.is_checked();
+            let vdd_close_checked = state.menu_items.vdd_close.is_checked();
+            let vdd_persistent_checked = state.menu_items.vdd_persistent.is_checked();
+            let vdd_create_enabled = state.menu_items.vdd_create.is_enabled();
+            let vdd_close_enabled = state.menu_items.vdd_close.is_enabled();
             
             // Build a completely new menu with the updated language
-            let (new_menu, new_menu_items, new_config_submenu, new_language_submenu, new_help_submenu, new_vdd_toggle_id) = build_menu();
+            let (new_menu, new_menu_items, new_vdd_submenu, new_advanced_submenu, new_language_submenu, new_visit_submenu) = build_menu();
             
-            // Restore the VDD toggle state
-            new_menu_items.vdd_toggle.set_checked(vdd_checked);
+            // Restore the VDD states
+            new_menu_items.vdd_create.set_checked(vdd_create_checked);
+            new_menu_items.vdd_close.set_checked(vdd_close_checked);
+            new_menu_items.vdd_persistent.set_checked(vdd_persistent_checked);
+            new_menu_items.vdd_create.set_enabled(vdd_create_enabled);
+            new_menu_items.vdd_close.set_enabled(vdd_close_enabled);
             
             // Set the new menu on the tray icon
             // This properly detaches the old menu subclass and attaches the new one
@@ -560,10 +591,10 @@ fn update_menu_texts() {
             // Update the state with the new menu and items
             state.menu = new_menu;
             state.menu_items = new_menu_items;
-            state.config_submenu = new_config_submenu;
+            state.vdd_submenu = new_vdd_submenu;
+            state.advanced_settings_submenu = new_advanced_submenu;
             state.language_submenu = new_language_submenu;
-            state.help_submenu = new_help_submenu;
-            state.vdd_toggle_id = new_vdd_toggle_id;
+            state.visit_project_submenu = new_visit_submenu;
         }
     }
 }
@@ -642,7 +673,7 @@ pub unsafe extern "C" fn tray_init_ex(
     let tooltip_str = c_str_to_string(tooltip).unwrap_or_else(|| "Sunshine".to_string());
     
     // Build menu
-    let (menu, menu_items, config_submenu, language_submenu, help_submenu, vdd_toggle_id) = build_menu();
+    let (menu, menu_items, vdd_submenu, advanced_settings_submenu, language_submenu, visit_project_submenu) = build_menu();
     
     // Create tray icon
     let tray_icon = match TrayIconBuilder::new()
@@ -662,10 +693,10 @@ pub unsafe extern "C" fn tray_init_ex(
     let state = TrayState {
         icon: tray_icon,
         menu,
-        vdd_toggle_id,
-        config_submenu,
+        vdd_submenu,
+        advanced_settings_submenu,
         language_submenu,
-        help_submenu,
+        visit_project_submenu,
         menu_items,
     };
     
@@ -851,24 +882,37 @@ pub unsafe extern "C" fn tray_set_tooltip(tooltip: *const c_char) {
     }
 }
 
-/// Update the VDD monitor toggle checkbox state
+/// Update the VDD create menu item state
 #[no_mangle]
-pub extern "C" fn tray_set_vdd_checked(checked: c_int) {
+pub extern "C" fn tray_set_vdd_create_state(checked: c_int, enabled: c_int) {
     if let Some(state_mutex) = TRAY_STATE.get() {
         let state_guard = state_mutex.lock();
         if let Some(ref state) = *state_guard {
-            state.menu_items.vdd_toggle.set_checked(checked != 0);
+            state.menu_items.vdd_create.set_checked(checked != 0);
+            state.menu_items.vdd_create.set_enabled(enabled != 0);
         }
     }
 }
 
-/// Set the VDD toggle menu item enabled state
+/// Update the VDD close menu item state
 #[no_mangle]
-pub extern "C" fn tray_set_vdd_enabled(enabled: c_int) {
+pub extern "C" fn tray_set_vdd_close_state(checked: c_int, enabled: c_int) {
     if let Some(state_mutex) = TRAY_STATE.get() {
         let state_guard = state_mutex.lock();
         if let Some(ref state) = *state_guard {
-            state.menu_items.vdd_toggle.set_enabled(enabled != 0);
+            state.menu_items.vdd_close.set_checked(checked != 0);
+            state.menu_items.vdd_close.set_enabled(enabled != 0);
+        }
+    }
+}
+
+/// Update the VDD persistent menu item state
+#[no_mangle]
+pub extern "C" fn tray_set_vdd_persistent_state(checked: c_int) {
+    if let Some(state_mutex) = TRAY_STATE.get() {
+        let state_guard = state_mutex.lock();
+        if let Some(ref state) = *state_guard {
+            state.menu_items.vdd_persistent.set_checked(checked != 0);
         }
     }
 }
