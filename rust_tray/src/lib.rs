@@ -13,6 +13,8 @@
 pub mod i18n;
 pub mod actions;
 pub mod config;
+pub mod menu;
+pub mod menu_items;
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
@@ -21,13 +23,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(target_os = "windows"))]
 use image::ImageReader;
-use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem};
+use muda::{Menu, MenuEvent};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
-use i18n::{StringKey, get_string, set_locale_str};
-use actions::{MenuAction, trigger_action, register_callback, ActionCallback, open_url, urls};
+use i18n::set_locale_str;
+use actions::{register_callback, ActionCallback};
 
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -38,43 +40,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 #[cfg(target_os = "windows")]
 use std::sync::atomic::AtomicI32;
 
-/// Tray state
+/// Tray state - simplified to use menu registry
 #[allow(dead_code)]  // Fields are needed for lifetime management
 struct TrayState {
     icon: TrayIcon,
     menu: Menu,
-    // Submenu references
-    vdd_submenu: Submenu,
-    advanced_settings_submenu: Submenu,
-    language_submenu: Submenu,
-    visit_project_submenu: Submenu,
-    // All menu items for rebuilding
-    menu_items: MenuItems,
-}
-
-struct MenuItems {
-    open_sunshine: MenuItem,
-    // VDD submenu items
-    vdd_create: CheckMenuItem,
-    vdd_close: CheckMenuItem,
-    vdd_persistent: CheckMenuItem,
-    // Advanced Settings submenu items
-    import_config: MenuItem,
-    export_config: MenuItem,
-    reset_config: MenuItem,
-    close_app: MenuItem,
-    #[cfg(target_os = "windows")]
-    reset_display: MenuItem,
-    // Language submenu items
-    lang_chinese: MenuItem,
-    lang_english: MenuItem,
-    lang_japanese: MenuItem,
-    // Other items
-    star_project: MenuItem,
-    visit_sunshine: MenuItem,
-    visit_moonlight: MenuItem,
-    restart: MenuItem,
-    quit: MenuItem,
 }
 
 // Safety: TrayState is only accessed from the main thread
@@ -233,25 +203,6 @@ fn load_icon_from_path(path: &str) -> Option<Icon> {
     Icon::from_rgba(rgba, width, height).ok()
 }
 
-#[cfg(target_os = "linux")]
-fn load_icon_by_name(name: &str) -> Option<Icon> {
-    let paths = [
-        format!("/usr/share/icons/hicolor/256x256/apps/{}.png", name),
-        format!("/usr/share/icons/hicolor/128x128/apps/{}.png", name),
-        format!("/usr/share/icons/hicolor/64x64/apps/{}.png", name),
-        format!("/usr/share/pixmaps/{}.png", name),
-    ];
-
-    for path in &paths {
-        if Path::new(path).exists() {
-            if let Some(icon) = load_icon_from_path(path) {
-                return Some(icon);
-            }
-        }
-    }
-    None
-}
-
 /// Load icon
 ///
 /// On Windows: expects .ico file path (supports multi-resolution)
@@ -263,298 +214,32 @@ fn load_icon(icon_str: &str) -> Option<Icon> {
         return load_icon_from_path(icon_str);
     }
 
-    // On Linux, try searching by icon name
-    #[cfg(target_os = "linux")]
-    {
-        return load_icon_by_name(icon_str);
-    }
-
-    #[cfg(not(target_os = "linux"))]
     {
         eprintln!("Icon not found: {}", icon_str);
         None
     }
 }
 
-/// Build the tray menu with current language
-fn build_menu() -> (Menu, MenuItems, Submenu, Submenu, Submenu, Submenu) {
-    let menu = Menu::new();
-    
-    // Open Sunshine
-    let open_sunshine = MenuItem::new(get_string(StringKey::OpenSunshine), true, None);
-    let _ = menu.append(&open_sunshine);
-    
-    // Separator
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    
-    // VDD submenu (Windows only, but we keep it for structure consistency)
-    let vdd_create = CheckMenuItem::new(get_string(StringKey::VddCreate), true, false, None);
-    let vdd_close = CheckMenuItem::new(get_string(StringKey::VddClose), true, false, None);
-    let vdd_persistent = CheckMenuItem::new(get_string(StringKey::VddPersistent), true, false, None);
-    
-    let vdd_submenu = Submenu::new(get_string(StringKey::VddBaseDisplay), true);
-    let _ = vdd_submenu.append(&vdd_create);
-    let _ = vdd_submenu.append(&vdd_close);
-    let _ = vdd_submenu.append(&vdd_persistent);
-    
-    #[cfg(target_os = "windows")]
-    let _ = menu.append(&vdd_submenu);
-    
-    // Advanced Settings submenu (Windows only)
-    let import_config = MenuItem::new(get_string(StringKey::ImportConfig), true, None);
-    let export_config = MenuItem::new(get_string(StringKey::ExportConfig), true, None);
-    let reset_config = MenuItem::new(get_string(StringKey::ResetToDefault), true, None);
-    let close_app = MenuItem::new(get_string(StringKey::CloseApp), true, None);
-    
-    #[cfg(target_os = "windows")]
-    let reset_display = MenuItem::new(get_string(StringKey::ResetDisplayDeviceConfig), true, None);
-    
-    let advanced_settings_submenu = Submenu::new(get_string(StringKey::AdvancedSettings), true);
-    let _ = advanced_settings_submenu.append(&import_config);
-    let _ = advanced_settings_submenu.append(&export_config);
-    let _ = advanced_settings_submenu.append(&reset_config);
-    let _ = advanced_settings_submenu.append(&PredefinedMenuItem::separator());
-    let _ = advanced_settings_submenu.append(&close_app);
-    #[cfg(target_os = "windows")]
-    let _ = advanced_settings_submenu.append(&reset_display);
-    
-    #[cfg(target_os = "windows")]
-    let _ = menu.append(&advanced_settings_submenu);
-    
-    // Separator
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    
-    // Language submenu
-    let lang_chinese = MenuItem::new(get_string(StringKey::Chinese), true, None);
-    let lang_english = MenuItem::new(get_string(StringKey::English), true, None);
-    let lang_japanese = MenuItem::new(get_string(StringKey::Japanese), true, None);
-    
-    let language_submenu = Submenu::new(get_string(StringKey::Language), true);
-    let _ = language_submenu.append(&lang_chinese);
-    let _ = language_submenu.append(&lang_english);
-    let _ = language_submenu.append(&lang_japanese);
-    let _ = menu.append(&language_submenu);
-    
-    // Separator
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    
-    // Star Project
-    let star_project = MenuItem::new(get_string(StringKey::StarProject), true, None);
-    let _ = menu.append(&star_project);
-    
-    // Visit Project submenu
-    let visit_sunshine = MenuItem::new(get_string(StringKey::VisitProjectSunshine), true, None);
-    let visit_moonlight = MenuItem::new(get_string(StringKey::VisitProjectMoonlight), true, None);
-    
-    let visit_project_submenu = Submenu::new(get_string(StringKey::VisitProject), true);
-    let _ = visit_project_submenu.append(&visit_sunshine);
-    let _ = visit_project_submenu.append(&visit_moonlight);
-    let _ = menu.append(&visit_project_submenu);
-    
-    // Separator
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    
-    // Restart
-    let restart = MenuItem::new(get_string(StringKey::Restart), true, None);
-    let _ = menu.append(&restart);
-    
-    // Quit
-    let quit = MenuItem::new(get_string(StringKey::Quit), true, None);
-    let _ = menu.append(&quit);
-    
-    let menu_items = MenuItems {
-        open_sunshine,
-        vdd_create,
-        vdd_close,
-        vdd_persistent,
-        import_config,
-        export_config,
-        reset_config,
-        close_app,
-        #[cfg(target_os = "windows")]
-        reset_display,
-        lang_chinese,
-        lang_english,
-        lang_japanese,
-        star_project,
-        visit_sunshine,
-        visit_moonlight,
-        restart,
-        quit,
-    };
-    
-    (menu, menu_items, vdd_submenu, advanced_settings_submenu, language_submenu, visit_project_submenu)
-}
-
 /// Identify which action corresponds to the menu event
-/// Returns the action to perform (if any) and whether menu rebuild is needed
-fn identify_menu_action(event: &MenuEvent, state: &TrayState) -> (Option<MenuAction>, bool) {
-    let items = &state.menu_items;
+/// Returns the item_id (if any)
+fn identify_menu_item(event: &MenuEvent) -> Option<String> {
+    menu::identify_item_id(event)
+}
+
+/// Execute the identified action by item_id
+/// Uses menu_items module for centralized handling
+fn execute_action_by_id(item_id: &str) {
+    let (handled, needs_rebuild) = menu_items::execute_handler(item_id);
     
-    if event.id == items.open_sunshine.id() {
-        (Some(MenuAction::OpenUI), false)
-    } else if event.id == items.vdd_create.id() {
-        (Some(MenuAction::VddCreate), false)
-    } else if event.id == items.vdd_close.id() {
-        (Some(MenuAction::VddClose), false)
-    } else if event.id == items.vdd_persistent.id() {
-        (Some(MenuAction::VddPersistent), false)
-    } else if event.id == items.import_config.id() {
-        (Some(MenuAction::ImportConfig), false)
-    } else if event.id == items.export_config.id() {
-        (Some(MenuAction::ExportConfig), false)
-    } else if event.id == items.reset_config.id() {
-        (Some(MenuAction::ResetConfig), false)
-    } else if event.id == items.close_app.id() {
-        (Some(MenuAction::CloseApp), false)
-    } else if event.id == items.lang_chinese.id() {
-        (Some(MenuAction::LanguageChinese), true)
-    } else if event.id == items.lang_english.id() {
-        (Some(MenuAction::LanguageEnglish), true)
-    } else if event.id == items.lang_japanese.id() {
-        (Some(MenuAction::LanguageJapanese), true)
-    } else if event.id == items.star_project.id() {
-        (Some(MenuAction::StarProject), false)
-    } else if event.id == items.visit_sunshine.id() {
-        (Some(MenuAction::VisitProjectSunshine), false)
-    } else if event.id == items.visit_moonlight.id() {
-        (Some(MenuAction::VisitProjectMoonlight), false)
-    } else if event.id == items.restart.id() {
-        (Some(MenuAction::Restart), false)
-    } else if event.id == items.quit.id() {
-        (Some(MenuAction::Quit), false)
-    } else {
-        #[cfg(target_os = "windows")]
-        if event.id == items.reset_display.id() {
-            return (Some(MenuAction::ResetDisplayDeviceConfig), false);
-        }
-        (None, false)
+    if handled && needs_rebuild {
+        update_menu_texts();
     }
 }
 
-/// Execute the identified action
-/// This is called AFTER releasing the state lock to avoid deadlocks
-fn execute_action(action: MenuAction, needs_menu_rebuild: bool) {
-    match action {
-        MenuAction::ImportConfig => {
-            // Handle config import in Rust
-            std::thread::spawn(|| {
-                if let Err(e) = config::import_config() {
-                    match e {
-                        config::ConfigError::DialogCancelled => {}
-                        _ => {
-                            config::show_message_box(
-                                i18n::get_string(i18n::StringKey::ImportErrorTitle),
-                                &format!("{}", e),
-                                true,
-                            );
-                        }
-                    }
-                }
-            });
-            trigger_action(action);
-        }
-        MenuAction::ExportConfig => {
-            // Handle config export in Rust
-            std::thread::spawn(|| {
-                if let Err(e) = config::export_config() {
-                    match e {
-                        config::ConfigError::DialogCancelled => {}
-                        _ => {
-                            config::show_message_box(
-                                i18n::get_string(i18n::StringKey::ExportErrorTitle),
-                                &format!("{}", e),
-                                true,
-                            );
-                        }
-                    }
-                }
-            });
-            trigger_action(action);
-        }
-        MenuAction::ResetConfig => {
-            // Handle config reset in Rust
-            std::thread::spawn(|| {
-                if let Err(e) = config::reset_config() {
-                    match e {
-                        config::ConfigError::DialogCancelled => {}
-                        _ => {
-                            config::show_message_box(
-                                i18n::get_string(i18n::StringKey::ResetErrorTitle),
-                                &format!("{}", e),
-                                true,
-                            );
-                        }
-                    }
-                }
-            });
-            trigger_action(action);
-        }
-        MenuAction::LanguageChinese => {
-            set_locale_str("zh");
-            let _ = config::save_tray_locale("zh");
-            trigger_action(action);
-            if needs_menu_rebuild {
-                update_menu_texts();
-            }
-        }
-        MenuAction::LanguageEnglish => {
-            set_locale_str("en");
-            let _ = config::save_tray_locale("en");
-            trigger_action(action);
-            if needs_menu_rebuild {
-                update_menu_texts();
-            }
-        }
-        MenuAction::LanguageJapanese => {
-            set_locale_str("ja");
-            let _ = config::save_tray_locale("ja");
-            trigger_action(action);
-            if needs_menu_rebuild {
-                update_menu_texts();
-            }
-        }
-        MenuAction::StarProject => {
-            open_url(urls::GITHUB_PROJECT);
-            trigger_action(action);
-        }
-        MenuAction::VisitProjectSunshine => {
-            open_url(urls::PROJECT_SUNSHINE);
-            trigger_action(action);
-        }
-        MenuAction::VisitProjectMoonlight => {
-            open_url(urls::PROJECT_MOONLIGHT);
-            trigger_action(action);
-        }
-        _ => {
-            // For all other actions (VddCreate, VddClose, VddPersistent, CloseApp, ResetDisplayDeviceConfig, Restart, Quit), 
-            // just trigger the callback to let C++ handle them
-            trigger_action(action);
-        }
-    }
-}
-
-/// Process a menu event - identifies the action while holding the lock,
-/// then releases the lock before executing to avoid deadlocks
+/// Process a menu event - identifies the item and executes its handler
 fn process_menu_event(event: &MenuEvent) {
-    let (action, needs_rebuild) = {
-        // Hold lock only while identifying the action
-        if let Some(state_mutex) = TRAY_STATE.get() {
-            let state_guard = state_mutex.lock();
-            if let Some(ref state) = *state_guard {
-                identify_menu_action(event, state)
-            } else {
-                (None, false)
-            }
-        } else {
-            (None, false)
-        }
-        // Lock is released here
-    };
-    
-    // Execute action without holding the lock
-    if let Some(action) = action {
-        execute_action(action, needs_rebuild);
+    if let Some(item_id) = identify_menu_item(event) {
+        execute_action_by_id(&item_id);
     }
 }
 
@@ -564,37 +249,27 @@ fn process_menu_event(event: &MenuEvent) {
 /// can cause issues with the menu event handling. The safest approach is to rebuild
 /// the entire menu with the new texts.
 fn update_menu_texts() {
+    use menu_items::ids;
+    
+    // Save current VDD states
+    let vdd_create_checked = menu::get_check_state_by_id(ids::VDD_CREATE).unwrap_or(false);
+    let vdd_close_checked = menu::get_check_state_by_id(ids::VDD_CLOSE).unwrap_or(false);
+    let vdd_persistent_checked = menu::get_check_state_by_id(ids::VDD_PERSISTENT).unwrap_or(false);
+    
+    // Build new menu using the menu module
+    let new_menu = menu::rebuild_menu();
+    
+    // Restore VDD states
+    menu::set_check_state_by_id(ids::VDD_CREATE, vdd_create_checked);
+    menu::set_check_state_by_id(ids::VDD_CLOSE, vdd_close_checked);
+    menu::set_check_state_by_id(ids::VDD_PERSISTENT, vdd_persistent_checked);
+    
+    // Update tray state
     if let Some(state_mutex) = TRAY_STATE.get() {
         let mut state_guard = state_mutex.lock();
         if let Some(ref mut state) = *state_guard {
-            // Get the current VDD states before rebuilding
-            let vdd_create_checked = state.menu_items.vdd_create.is_checked();
-            let vdd_close_checked = state.menu_items.vdd_close.is_checked();
-            let vdd_persistent_checked = state.menu_items.vdd_persistent.is_checked();
-            let vdd_create_enabled = state.menu_items.vdd_create.is_enabled();
-            let vdd_close_enabled = state.menu_items.vdd_close.is_enabled();
-            
-            // Build a completely new menu with the updated language
-            let (new_menu, new_menu_items, new_vdd_submenu, new_advanced_submenu, new_language_submenu, new_visit_submenu) = build_menu();
-            
-            // Restore the VDD states
-            new_menu_items.vdd_create.set_checked(vdd_create_checked);
-            new_menu_items.vdd_close.set_checked(vdd_close_checked);
-            new_menu_items.vdd_persistent.set_checked(vdd_persistent_checked);
-            new_menu_items.vdd_create.set_enabled(vdd_create_enabled);
-            new_menu_items.vdd_close.set_enabled(vdd_close_enabled);
-            
-            // Set the new menu on the tray icon
-            // This properly detaches the old menu subclass and attaches the new one
             let _ = state.icon.set_menu(Some(Box::new(new_menu.clone())));
-            
-            // Update the state with the new menu and items
             state.menu = new_menu;
-            state.menu_items = new_menu_items;
-            state.vdd_submenu = new_vdd_submenu;
-            state.advanced_settings_submenu = new_advanced_submenu;
-            state.language_submenu = new_language_submenu;
-            state.visit_project_submenu = new_visit_submenu;
         }
     }
 }
@@ -672,8 +347,8 @@ pub unsafe extern "C" fn tray_init_ex(
     // Get tooltip
     let tooltip_str = c_str_to_string(tooltip).unwrap_or_else(|| "Sunshine".to_string());
     
-    // Build menu
-    let (menu, menu_items, vdd_submenu, advanced_settings_submenu, language_submenu, visit_project_submenu) = build_menu();
+    // Build menu using the menu module
+    let menu = menu::rebuild_menu();
     
     // Create tray icon
     let tray_icon = match TrayIconBuilder::new()
@@ -693,11 +368,6 @@ pub unsafe extern "C" fn tray_init_ex(
     let state = TrayState {
         icon: tray_icon,
         menu,
-        vdd_submenu,
-        advanced_settings_submenu,
-        language_submenu,
-        visit_project_submenu,
-        menu_items,
     };
     
     if let Some(state_mutex) = TRAY_STATE.get() {
@@ -885,36 +555,24 @@ pub unsafe extern "C" fn tray_set_tooltip(tooltip: *const c_char) {
 /// Update the VDD create menu item state
 #[no_mangle]
 pub extern "C" fn tray_set_vdd_create_state(checked: c_int, enabled: c_int) {
-    if let Some(state_mutex) = TRAY_STATE.get() {
-        let state_guard = state_mutex.lock();
-        if let Some(ref state) = *state_guard {
-            state.menu_items.vdd_create.set_checked(checked != 0);
-            state.menu_items.vdd_create.set_enabled(enabled != 0);
-        }
-    }
+    use menu_items::ids;
+    menu::set_check_state_by_id(ids::VDD_CREATE, checked != 0);
+    menu::set_item_enabled_by_id(ids::VDD_CREATE, enabled != 0);
 }
 
 /// Update the VDD close menu item state
 #[no_mangle]
 pub extern "C" fn tray_set_vdd_close_state(checked: c_int, enabled: c_int) {
-    if let Some(state_mutex) = TRAY_STATE.get() {
-        let state_guard = state_mutex.lock();
-        if let Some(ref state) = *state_guard {
-            state.menu_items.vdd_close.set_checked(checked != 0);
-            state.menu_items.vdd_close.set_enabled(enabled != 0);
-        }
-    }
+    use menu_items::ids;
+    menu::set_check_state_by_id(ids::VDD_CLOSE, checked != 0);
+    menu::set_item_enabled_by_id(ids::VDD_CLOSE, enabled != 0);
 }
 
 /// Update the VDD persistent menu item state
 #[no_mangle]
 pub extern "C" fn tray_set_vdd_persistent_state(checked: c_int) {
-    if let Some(state_mutex) = TRAY_STATE.get() {
-        let state_guard = state_mutex.lock();
-        if let Some(ref state) = *state_guard {
-            state.menu_items.vdd_persistent.set_checked(checked != 0);
-        }
-    }
+    use menu_items::ids;
+    menu::set_check_state_by_id(ids::VDD_PERSISTENT, checked != 0);
 }
 
 /// Set the current locale
