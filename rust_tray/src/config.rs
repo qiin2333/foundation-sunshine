@@ -27,6 +27,12 @@ pub enum ConfigError {
     NoConfigFound,
     DialogCancelled,
     NoUserSession,
+    InvalidExtension,
+    SymlinkNotAllowed,
+    NotRegularFile,
+    FileTooLarge,
+    FileEmpty,
+    InvalidFormat(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -38,6 +44,12 @@ impl std::fmt::Display for ConfigError {
             ConfigError::NoConfigFound => write!(f, "No configuration found"),
             ConfigError::DialogCancelled => write!(f, "Dialog cancelled"),
             ConfigError::NoUserSession => write!(f, "No active user session"),
+            ConfigError::InvalidExtension => write!(f, "Invalid file extension (only .conf allowed)"),
+            ConfigError::SymlinkNotAllowed => write!(f, "Symbolic links are not allowed"),
+            ConfigError::NotRegularFile => write!(f, "Path is not a regular file"),
+            ConfigError::FileTooLarge => write!(f, "File exceeds maximum size (1MB)"),
+            ConfigError::FileEmpty => write!(f, "Configuration file is empty"),
+            ConfigError::InvalidFormat(msg) => write!(f, "Invalid configuration format: {}", msg),
         }
     }
 }
@@ -262,20 +274,128 @@ pub fn open_export_dialog() -> ConfigResult<PathBuf> {
     }
 }
 
+// ============================================================================
+// Security Validation Functions
+// ============================================================================
+
+/// Maximum allowed configuration file size (1MB)
+const MAX_CONFIG_SIZE: usize = 1024 * 1024;
+
+/// Validate the file path for security
+/// 
+/// Checks:
+/// - File exists
+/// - Not a symbolic link
+/// - Is a regular file
+/// - Has .conf extension
+fn validate_file_path(path: &std::path::Path) -> ConfigResult<()> {
+    // Check if file exists
+    if !path.exists() {
+        return Err(ConfigError::ReadFailed("File does not exist".to_string()));
+    }
+    
+    // Check for symbolic link (prevent symlink attacks)
+    if path.symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(ConfigError::SymlinkNotAllowed);
+    }
+    
+    // Ensure it's a regular file
+    if !path.is_file() {
+        return Err(ConfigError::NotRegularFile);
+    }
+    
+    // Check file extension
+    if path.extension().map_or(true, |ext| ext != "conf") {
+        return Err(ConfigError::InvalidExtension);
+    }
+    
+    Ok(())
+}
+
+/// Validate the configuration file content
+/// 
+/// Checks:
+/// - File size within limits
+/// - Not empty
+/// - Basic format validation (key=value or comment lines)
+fn validate_config_content(content: &str) -> ConfigResult<()> {
+    // Check file size
+    if content.len() > MAX_CONFIG_SIZE {
+        return Err(ConfigError::FileTooLarge);
+    }
+    
+    // Check if empty
+    if content.trim().is_empty() {
+        return Err(ConfigError::FileEmpty);
+    }
+    
+    // Basic format validation
+    // Sunshine config format: key = value or # comment or [section]
+    let mut has_valid_line = false;
+    for (line_num, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
+        
+        // Allow comment lines
+        if trimmed.starts_with('#') || trimmed.starts_with(';') {
+            has_valid_line = true;
+            continue;
+        }
+        
+        // Allow section headers
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            has_valid_line = true;
+            continue;
+        }
+        
+        // Check for key=value format
+        if trimmed.contains('=') {
+            has_valid_line = true;
+            continue;
+        }
+        
+        // Invalid line found
+        return Err(ConfigError::InvalidFormat(
+            format!("Invalid syntax at line {}: {}", line_num + 1, 
+                    if trimmed.len() > 50 { &trimmed[..50] } else { trimmed })
+        ));
+    }
+    
+    // Must have at least one valid line (could be just comments for a minimal config)
+    if !has_valid_line {
+        return Err(ConfigError::InvalidFormat("No valid configuration lines found".to_string()));
+    }
+    
+    Ok(())
+}
+
 /// Import configuration from file
 pub fn import_config() -> ConfigResult<()> {
     // Open file dialog
     let source_path = open_import_dialog()?;
     
+    // Security validation: check file path
+    validate_file_path(&source_path)?;
+    
     // Read source file
     let content = fs::read_to_string(&source_path)
         .map_err(|e| ConfigError::ReadFailed(e.to_string()))?;
+    
+    // Security validation: check content
+    validate_config_content(&content)?;
     
     // Get destination path
     let dest_path = get_config_file_path().ok_or(ConfigError::PathNotFound)?;
     
     // Write to config file
-    fs::write(&dest_path, content)
+    fs::write(&dest_path, &content)
         .map_err(|e| ConfigError::WriteFailed(e.to_string()))?;
     
     show_message_box(
