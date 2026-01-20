@@ -6,7 +6,9 @@
 
 #include <bitset>
 #include <chrono>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -36,7 +38,7 @@ namespace config {
     bool nv_realtime_hags;
     bool nv_opengl_vulkan_on_dxgi;
     bool nv_sunshine_high_power_mode;
-    bool preferUseVdd;
+    bool vdd_keep_enabled;
 
     struct {
       int preset;
@@ -92,6 +94,8 @@ namespace config {
     };
 
     std::string output_name;
+    std::string capture_target;  // "display" or "window" - determines whether to capture display or window
+    std::string window_title;     // Window title to capture when capture_target="window"
     int display_device_prep;
     int resolution_change;
     std::string manual_resolution;
@@ -101,12 +105,14 @@ namespace config {
     std::vector<display_mode_remapping_t> display_mode_remapping;
     bool variable_refresh_rate;  // Allow video stream framerate to match render framerate for VRR support
     int minimum_fps_target;  // Minimum FPS target (0 = auto, 1-1000 = minimum FPS to maintain)
+    std::string downscaling_quality;  // Downscaling quality: "fast" (bilinear+8pt), "balanced" (bicubic), "high_quality" (future: lanczos)
   };
 
   struct audio_t {
     std::string sink;
     std::string virtual_sink;
     bool stream;
+    bool stream_mic;
     bool install_steam_drivers;
   };
 
@@ -141,7 +147,7 @@ namespace config {
 
     std::string external_ip;
     std::vector<std::string> resolutions;
-    std::vector<int> fps;
+    std::vector<std::string> fps;  // 支持小数刷新率，如 "119.88"
   };
 
   struct webhook_t {
@@ -220,6 +226,7 @@ namespace config {
 
     std::uint16_t port;
     std::string address_family;
+    std::string bind_address;
 
     std::string log_file;
     bool restore_log;  // 是否恢复日志文件（true=恢复，false=覆盖）
@@ -240,4 +247,10 @@ namespace config {
   parse(int argc, char *argv[]);
   std::unordered_map<std::string, std::string>
   parse_config(const std::string_view &file_content);
+
+  bool
+  update_config(const std::map<std::string, std::string> &updates);
+
+  bool
+  update_full_config(const std::map<std::string, std::string> &fullConfig);
 }  // namespace config

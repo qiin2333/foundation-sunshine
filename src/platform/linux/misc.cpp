@@ -31,6 +31,7 @@
 #include "src/entry_handler.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/platform/run_command.h"
 #include "vaapi.h"
 
 #ifdef __GNUC__
@@ -41,7 +42,7 @@
 
 using namespace std::literals;
 namespace fs = std::filesystem;
-namespace bp = boost::process;
+namespace bp = boost::process::v1;
 
 window_system_e window_system;
 
@@ -282,6 +283,16 @@ namespace platf {
       BOOST_LOG(debug) << "Opened url ["sv << url << "]"sv;
       child.detach();
     }
+  }
+
+  /**
+   * @brief Open a url directly in the system default browser.
+   * @param url The url to open.
+   */
+  void
+  open_url_in_browser(const std::string &url) {
+    // On Linux, xdg-open handles this correctly
+    open_url(url);
   }
 
   void

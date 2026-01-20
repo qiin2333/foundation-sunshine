@@ -97,9 +97,6 @@ SET(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
         DetailPrint '🎯 安装虚拟游戏手柄...'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\install-gamepad.bat\\\"'
         
-        DetailPrint '🎤 安装音频重定向组件...'
-        nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\install-vsink.bat\\\"'
-        
         DetailPrint '⚙️ 安装并启动系统服务...'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\install-service.bat\\\"'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\autostart-service.bat\\\"'
@@ -148,11 +145,6 @@ set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
             nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\uninstall-gamepad.bat\\\"'; skipped if no
         NoGamepad:
         MessageBox MB_YESNO|MB_ICONQUESTION \
-            'Do you want to remove Virtual Sink?' \
-            /SD IDNO IDNO NoSink
-            nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\uninstall-vsink.bat\\\"'; skipped if no
-        NoSink:
-        MessageBox MB_YESNO|MB_ICONQUESTION \
             'Do you want to remove $INSTDIR (this includes the configuration, cover images, and settings)?' \
             /SD IDNO IDNO NoDelete
             RMDir /r \\\"$INSTDIR\\\"; skipped if no
@@ -178,7 +170,7 @@ set(CPACK_NSIS_CREATE_ICONS_EXTRA
         SetOutPath '\$INSTDIR'
         
         ; 主程序快捷方式 - 使用可执行文件的内嵌图标
-        CreateShortCut '\$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\Sunshine Service.lnk' \
+        CreateShortCut '\$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\Sunshine.lnk' \
             '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' '--shortcut' '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' 0
             
         ; GUI管理工具快捷方式 - 使用GUI程序的内嵌图标
@@ -192,7 +184,7 @@ set(CPACK_NSIS_CREATE_ICONS_EXTRA
 
 set(CPACK_NSIS_DELETE_ICONS_EXTRA
         "${CPACK_NSIS_DELETE_ICONS_EXTRA}
-        Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\Sunshine Service.lnk'
+        Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\Sunshine.lnk'
         Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\Sunshine GUI.lnk'
         Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\Sunshine Tools.lnk'
         Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\${CMAKE_PROJECT_NAME}.lnk'

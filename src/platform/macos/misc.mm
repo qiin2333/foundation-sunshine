@@ -21,6 +21,7 @@
 #include "src/entry_handler.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/platform/run_command.h"
 
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/host_name.hpp>
@@ -28,7 +29,7 @@
 
 using namespace std::literals;
 namespace fs = std::filesystem;
-namespace bp = boost::process;
+namespace bp = boost::process::v1;
 
 namespace platf {
 
@@ -210,6 +211,16 @@ namespace platf {
       BOOST_LOG(info) << "Opened url ["sv << url << "]"sv;
       child.detach();
     }
+  }
+
+  /**
+   * @brief Open a url directly in the system default browser.
+   * @param url The url to open.
+   */
+  void
+  open_url_in_browser(const std::string &url) {
+    // On macOS, the open command handles this correctly
+    open_url(url);
   }
 
   void

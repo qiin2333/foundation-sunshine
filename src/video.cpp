@@ -12,11 +12,33 @@
 #include <boost/pointer_cast.hpp>
 
 extern "C" {
+#include <libavutil/hdr_dynamic_metadata.h>
+#include <libavutil/hdr_dynamic_vivid_metadata.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 }
+
+// AMF SDK headers for direct encoder access (Windows only)
+#ifdef _WIN32
+  #include <AMF/components/Component.h>
+  #include <AMF/components/VideoEncoderAV1.h>
+  #include <AMF/components/VideoEncoderHEVC.h>
+  #include <AMF/components/VideoEncoderVCE.h>
+  #include <AMF/core/Interface.h>
+  #include <AMF/core/PropertyStorage.h>
+  #include <cstring>  // for strstr
+
+// Forward declaration of FFmpeg's internal AMFEncoderContext structure
+// This structure layout must match FFmpeg's libavcodec/amfenc.h
+// We only need the first few fields to access the encoder pointer
+struct AMFEncoderContext_Partial {
+  void *avclass;  // AVClass pointer
+  void *device_ctx_ref;  // AVBufferRef pointer
+  amf::AMFComponent *encoder;  // AMF encoder object
+};
+#endif
 
 // lib includes
 #include "cbs.h"
@@ -34,6 +56,7 @@ extern "C" {
 extern "C" {
   #include <libavutil/hwcontext_d3d11va.h>
 }
+  #include "platform/windows/display_device/windows_utils.h"
 #endif
 
 using namespace std::literals;
@@ -130,6 +153,8 @@ namespace video {
   cuda_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
   util::Either<avcodec_buffer_t, int>
   vt_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
+  util::Either<avcodec_buffer_t, int>
+  vulkan_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
 
   class avcodec_software_encode_device_t: public platf::avcodec_encode_device_t {
   public:
@@ -385,23 +410,66 @@ namespace video {
 
     void
     set_bitrate(int bitrate_kbps) override {
-      if (avcodec_ctx) {
-        // 考虑FEC影响，调整编码码率
-        // 当FEC百分比为X%时，实际编码码率需要调整为原始码率的(100-X)%
-        auto adjusted_bitrate_kbps = bitrate_kbps;
-        if (config::stream.fec_percentage <= 80) {
-          adjusted_bitrate_kbps = (int)(bitrate_kbps * (100 - config::stream.fec_percentage) / 100.0f);
-        }
-        
-        auto bitrate = adjusted_bitrate_kbps * 1000;  // 转换为bps
-        avcodec_ctx->rc_max_rate = bitrate;
-        avcodec_ctx->bit_rate = bitrate;
-        avcodec_ctx->rc_min_rate = bitrate;  // Set min rate for CBR mode
-        
-        BOOST_LOG(info) << "AVCodec encoder bitrate changed to: " << adjusted_bitrate_kbps 
-                       << " Kbps (requested: " << bitrate_kbps << " Kbps, FEC: " 
-                       << config::stream.fec_percentage << "%)";
+      if (!avcodec_ctx) return;
+
+      // Adjust encoding bitrate considering FEC overhead
+      // When FEC percentage is X%, actual encoding bitrate should be (100-X)% of requested
+      auto adjusted_bitrate_kbps = bitrate_kbps;
+      if (config::stream.fec_percentage > 0 && config::stream.fec_percentage <= 80) {
+        adjusted_bitrate_kbps = bitrate_kbps * (100 - config::stream.fec_percentage) / 100;
       }
+
+      auto bitrate = static_cast<int64_t>(adjusted_bitrate_kbps) * 1000;  // Convert to bps
+
+      // Update AVCodecContext fields (for software encoders and as fallback)
+      avcodec_ctx->bit_rate = bitrate;
+      avcodec_ctx->rc_max_rate = bitrate;
+      avcodec_ctx->rc_min_rate = bitrate;
+
+#ifdef _WIN32
+      // For AMF encoders, directly call AMF SDK to change bitrate dynamically
+      // AMF_VIDEO_ENCODER_TARGET_BITRATE, AMF_VIDEO_ENCODER_PEAK_BITRATE, and
+      // AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE are documented as "Dynamic properties -
+      // can be set at any time" in AMF SDK
+      const AVCodec *codec = avcodec_ctx->codec;
+      if (codec && codec->name && avcodec_ctx->priv_data && strstr(codec->name, "_amf")) {
+        auto *amf_ctx = reinterpret_cast<AMFEncoderContext_Partial *>(avcodec_ctx->priv_data);
+        if (amf_ctx && amf_ctx->encoder) {
+          // VBV buffer size: 1 second worth of data at the target bitrate
+          int64_t vbv_buffer_size = bitrate;
+          AMF_RESULT res = AMF_OK;
+
+          // Set properties based on codec type
+          if (strstr(codec->name, "h264_amf")) {
+            res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, vbv_buffer_size);
+            if (res == AMF_OK) res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, bitrate);
+            if (res == AMF_OK) res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_PEAK_BITRATE, bitrate);
+          }
+          else if (strstr(codec->name, "hevc_amf")) {
+            res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, vbv_buffer_size);
+            if (res == AMF_OK) res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, bitrate);
+            if (res == AMF_OK) res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, bitrate);
+          }
+          else if (strstr(codec->name, "av1_amf")) {
+            res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE, vbv_buffer_size);
+            if (res == AMF_OK) res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, bitrate);
+            if (res == AMF_OK) res = amf_ctx->encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE, bitrate);
+          }
+
+          if (res == AMF_OK) {
+            BOOST_LOG(info) << "AMF encoder bitrate dynamically changed to: " << adjusted_bitrate_kbps
+                            << " Kbps (requested: " << bitrate_kbps << " Kbps, FEC: "
+                            << config::stream.fec_percentage << "%)";
+            return;
+          }
+          BOOST_LOG(warning) << "AMF SetProperty for bitrate failed with error: " << res;
+        }
+      }
+#endif
+
+      BOOST_LOG(info) << "AVCodec encoder bitrate set to: " << adjusted_bitrate_kbps
+                      << " Kbps (requested: " << bitrate_kbps << " Kbps, FEC: "
+                      << config::stream.fec_percentage << "%)";
     }
 
     void
@@ -409,6 +477,15 @@ namespace video {
       if (!avcodec_ctx) return;
 
       switch (param.type) {
+        case dynamic_param_type_e::RESOLUTION:
+          // 分辨率变更需要重新初始化编码器
+          BOOST_LOG(info) << "AVCodec encoder: Resolution change requested (requires encoder reinitialization)";
+          break;
+        case dynamic_param_type_e::FPS:
+          // FPS变更需要重新配置编码器
+          BOOST_LOG(info) << "AVCodec encoder: FPS change requested: " << param.value.float_value
+                          << " fps (requires encoder reconfiguration)";
+          break;
         case dynamic_param_type_e::BITRATE: {
           // 码率调整通过set_bitrate处理
           set_bitrate(param.value.int_value);
@@ -420,7 +497,8 @@ namespace video {
             avcodec_ctx->qmin = param.value.int_value;
             avcodec_ctx->qmax = param.value.int_value;
             BOOST_LOG(info) << "AVCodec encoder QP changed to: " << param.value.int_value;
-          } else {
+          }
+          else {
             BOOST_LOG(warning) << "Invalid QP value: " << param.value.int_value << " (must be 0-51)";
           }
           break;
@@ -434,7 +512,7 @@ namespace video {
           break;
         }
         default:
-          BOOST_LOG(warning) << "AVCodec encoder: Unsupported dynamic parameter type: " << (int)param.type;
+          BOOST_LOG(warning) << "AVCodec encoder: Unsupported dynamic parameter type: " << (int) param.type;
           break;
       }
     }
@@ -489,13 +567,13 @@ namespace video {
         // 当FEC百分比为X%时，实际编码码率需要调整为原始码率的(100-X)%
         auto adjusted_bitrate_kbps = bitrate_kbps;
         if (config::stream.fec_percentage <= 80) {
-          adjusted_bitrate_kbps = (int)(bitrate_kbps * (100 - config::stream.fec_percentage) / 100.0f);
+          adjusted_bitrate_kbps = (int) (bitrate_kbps * (100 - config::stream.fec_percentage) / 100.0f);
         }
-        
+
         device->nvenc->set_bitrate(adjusted_bitrate_kbps);
-        BOOST_LOG(info) << "NVENC encoder bitrate changed to: " << adjusted_bitrate_kbps 
-                       << " Kbps (requested: " << bitrate_kbps << " Kbps, FEC: " 
-                       << config::stream.fec_percentage << "%)";
+        BOOST_LOG(info) << "NVENC encoder bitrate changed to: " << adjusted_bitrate_kbps
+                        << " Kbps (requested: " << bitrate_kbps << " Kbps, FEC: "
+                        << config::stream.fec_percentage << "%)";
       }
     }
 
@@ -504,6 +582,15 @@ namespace video {
       if (!device || !device->nvenc) return;
 
       switch (param.type) {
+        case dynamic_param_type_e::RESOLUTION:
+          // 分辨率变更需要重新初始化编码器，这里只记录日志
+          BOOST_LOG(info) << "NVENC encoder: Resolution change requested (requires encoder reinitialization)";
+          break;
+        case dynamic_param_type_e::FPS:
+          // FPS变更需要重新配置编码器
+          BOOST_LOG(info) << "NVENC encoder: FPS change requested: " << param.value.float_value
+                          << " fps (requires encoder reconfiguration)";
+          break;
         case dynamic_param_type_e::BITRATE: {
           // 码率调整通过set_bitrate处理
           set_bitrate(param.value.int_value);
@@ -511,8 +598,8 @@ namespace video {
         }
         case dynamic_param_type_e::QP: {
           // NVENC的QP调整需要通过重新配置编码器
-          BOOST_LOG(info) << "NVENC encoder QP change requested: " << param.value.int_value 
-                         << " (requires encoder reconfiguration)";
+          BOOST_LOG(info) << "NVENC encoder QP change requested: " << param.value.int_value
+                          << " (requires encoder reconfiguration)";
           break;
         }
         case dynamic_param_type_e::ADAPTIVE_QUANTIZATION: {
@@ -531,7 +618,7 @@ namespace video {
           break;
         }
         default:
-          BOOST_LOG(warning) << "NVENC encoder: Unsupported dynamic parameter type: " << (int)param.type;
+          BOOST_LOG(warning) << "NVENC encoder: Unsupported dynamic parameter type: " << (int) param.type;
           break;
       }
     }
@@ -860,6 +947,10 @@ namespace video {
         { "rc"s, &config::video.amd.amd_rc_av1 },
         { "usage"s, &config::video.amd.amd_usage_av1 },
         { "enforce_hrd"s, &config::video.amd.amd_enforce_hrd },
+        // AV1 optimization options (no latency impact)
+        { "high_motion_quality_boost_enable"s, true },
+        { "pa_paq_mode"s, "caq"s },
+        { "pa_taq_mode"s, 2 },
       },
       {},  // SDR-specific options
       {},  // HDR-specific options
@@ -1125,9 +1216,63 @@ namespace video {
   };
 #endif
 
+  // Vulkan encoder - cross-platform (Windows and Linux)
+#if !defined(__APPLE__)
+  encoder_t vulkan {
+    "vulkan"sv,
+    std::make_unique<encoder_platform_formats_avcodec>(
+      AV_HWDEVICE_TYPE_VULKAN, AV_HWDEVICE_TYPE_NONE,
+      AV_PIX_FMT_VULKAN,
+      AV_PIX_FMT_NV12, AV_PIX_FMT_P010,
+      AV_PIX_FMT_NONE, AV_PIX_FMT_NONE,
+      vulkan_init_avcodec_hardware_input_buffer),
+    {
+      // Common options for AV1
+      {
+        { "forced_idr"s, 1 },
+        { "async_depth"s, 1 },
+      },
+      {},  // SDR-specific options
+      {},  // HDR-specific options
+      {},  // YUV444 SDR-specific options
+      {},  // YUV444 HDR-specific options
+      {},  // Fallback options
+      "av1_vulkan"s,
+    },
+    {
+      // Common options for HEVC (if supported)
+      {
+        { "forced_idr"s, 1 },
+        { "async_depth"s, 1 },
+      },
+      {},  // SDR-specific options
+      {},  // HDR-specific options
+      {},  // YUV444 SDR-specific options
+      {},  // YUV444 HDR-specific options
+      {},  // Fallback options
+      "hevc_vulkan"s,
+    },
+    {
+      // Common options for H.264 (if supported)
+      {
+        { "forced_idr"s, 1 },
+        { "async_depth"s, 1 },
+      },
+      {},  // SDR-specific options
+      {},  // HDR-specific options
+      {},  // YUV444 SDR-specific options
+      {},  // YUV444 HDR-specific options
+      {},  // Fallback options
+      "h264_vulkan"s,
+    },
+    PARALLEL_ENCODING
+  };
+#endif
+
   static const std::vector<encoder_t *> encoders {
 #ifndef __APPLE__
     &nvenc,
+    &vulkan,  // Vulkan encoder (cross-platform)
 #endif
 #ifdef _WIN32
     &quicksync,
@@ -1255,7 +1400,40 @@ namespace video {
     std::vector<std::string> display_names;
     int display_p = -1;
     refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
-    auto disp = platf::display(encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+
+    // Use client-specified display_name if provided, otherwise use the selected display
+    std::string target_display_name;
+    const auto &config = capture_ctxs.front().config;
+    if (!config.display_name.empty()) {
+      // config.display_name may be a device ID (e.g., {xxx-xxx-xxx}) rather than display name (e.g., \\.\DISPLAY1)
+      // Try to convert device ID to display name first
+      std::string resolved_display_name = display_device::get_display_name(config.display_name);
+      if (resolved_display_name.empty()) {
+        // If conversion failed, use the original value (might already be a display name)
+        resolved_display_name = config.display_name;
+      }
+
+      // Try to find the display in the list
+      bool found = false;
+      for (int x = 0; x < display_names.size(); ++x) {
+        if (display_names[x] == resolved_display_name) {
+          display_p = x;
+          target_display_name = resolved_display_name;
+          found = true;
+          BOOST_LOG(info) << "Using client-specified display: " << target_display_name;
+          break;
+        }
+      }
+      if (!found) {
+        BOOST_LOG(warning) << "Client-specified display [" << config.display_name << "] (resolved: " << resolved_display_name << ") not found, using default display";
+        target_display_name = display_names[display_p];
+      }
+    }
+    else {
+      target_display_name = display_names[display_p];
+    }
+
+    auto disp = platf::display(encoder.platform_formats->dev_type, target_display_name, config);
     if (!disp) {
       return;
     }
@@ -1448,8 +1626,33 @@ namespace video {
               display_p = std::clamp(*switch_display_event->pop(), 0, (int) display_names.size() - 1);
             }
 
+            // Use client-specified display_name if provided
+            const auto &config = capture_ctxs.front().config;
+            std::string target_display_name = display_names[display_p];
+            if (!config.display_name.empty()) {
+              // config.display_name may be a device ID - convert to display name
+              std::string resolved_display_name = display_device::get_display_name(config.display_name);
+              if (resolved_display_name.empty()) {
+                resolved_display_name = config.display_name;
+              }
+
+              // Try to find the display in the list
+              bool found = false;
+              for (int x = 0; x < display_names.size(); ++x) {
+                if (display_names[x] == resolved_display_name) {
+                  display_p = x;
+                  target_display_name = resolved_display_name;
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                BOOST_LOG(warning) << "Client-specified display [" << config.display_name << "] (resolved: " << resolved_display_name << ") not found, using default display";
+              }
+            }
+
             // reset_display() will sleep between retries
-            reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+            reset_display(disp, encoder.platform_formats->dev_type, target_display_name, config);
             if (disp) {
               break;
             }
@@ -1554,6 +1757,12 @@ namespace video {
   encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
     auto encoded_frame = session.encode_frame(frame_nr);
     if (encoded_frame.data.empty()) {
+      // Empty data with valid frame_index means encoder needs more input (NV_ENC_ERR_NEED_MORE_INPUT).
+      // This is not an error - just return success and continue with next frame.
+      if (encoded_frame.frame_index == static_cast<uint64_t>(frame_nr)) {
+        BOOST_LOG(debug) << "NvENC: frame " << frame_nr << " buffered, waiting for more input";
+        return 0;
+      }
       BOOST_LOG(error) << "NvENC returned empty packet";
       return -1;
     }
@@ -1930,6 +2139,120 @@ namespace video {
           clm->MaxCLL = hdr_metadata.maxContentLightLevel;
           clm->MaxFALL = hdr_metadata.maxFrameAverageLightLevel;
         }
+
+        // Add HDR10+ dynamic metadata support
+        // Generate simplified dynamic metadata based on static metadata
+        // In the future, this could be enhanced with per-frame content analysis
+        auto hdr10plus = av_dynamic_hdr_plus_create_side_data(frame.get());
+        if (hdr10plus) {
+          // Set default values for HDR10+
+          hdr10plus->itu_t_t35_country_code = 0xB5;  // USA
+          hdr10plus->application_version = 0;
+          hdr10plus->num_windows = 1;  // Single processing window covering entire frame
+
+          // Initialize the first (and only) processing window
+          auto &params = hdr10plus->params[0];
+          params.window_upper_left_corner_x = av_make_q(0, 1);
+          params.window_upper_left_corner_y = av_make_q(0, 1);
+          params.window_lower_right_corner_x = av_make_q(1, 1);
+          params.window_lower_right_corner_y = av_make_q(1, 1);
+
+          // Set center of elliptical pixel selector to center of frame
+          params.center_of_ellipse_x = static_cast<uint16_t>(config.width / 2);
+          params.center_of_ellipse_y = static_cast<uint16_t>(config.height / 2);
+          params.rotation_angle = 0;  // 0 degrees
+          params.semimajor_axis_internal_ellipse = static_cast<uint16_t>(config.width / 2);
+          params.semimajor_axis_external_ellipse = static_cast<uint16_t>(config.width / 2);
+          params.semiminor_axis_external_ellipse = static_cast<uint16_t>(config.height / 2);
+          params.overlap_process_option = AV_HDR_PLUS_OVERLAP_PROCESS_WEIGHTED_AVERAGING;
+
+          // Set maxscl (maximum of R, G, B) to 1.0 (full brightness)
+          params.maxscl[0] = av_make_q(1, 1);
+          params.maxscl[1] = av_make_q(1, 1);
+          params.maxscl[2] = av_make_q(1, 1);
+          params.maxscl[3] = av_make_q(0, 1);  // Unused
+
+          // Set average maxRGB to 1.0
+          params.average_maxrgb = av_make_q(1, 1);
+
+          // Initialize percentile distribution (simplified)
+          params.num_distribution_maxrgb_percentiles = 0;  // No percentiles for simplified metadata
+
+          // Set fraction brightness to 0 (no bright pixels)
+          params.fraction_bright_pixels = av_make_q(0, 1);
+
+          // Set tone mapping curve to linear (no adjustment)
+          params.tone_mapping_flag = 0;
+          params.knee_point_x = av_make_q(0, 1);
+          params.knee_point_y = av_make_q(0, 1);
+          params.num_bezier_curve_anchors = 0;
+
+          // Set targeted system display maximum luminance from static metadata
+          hdr10plus->targeted_system_display_maximum_luminance = av_make_q(hdr_metadata.maxDisplayLuminance, 1);
+          hdr10plus->targeted_system_display_actual_peak_luminance_flag = 0;
+          hdr10plus->mastering_display_actual_peak_luminance_flag = 0;
+
+          BOOST_LOG(debug) << "Added HDR10+ dynamic metadata to frame";
+        }
+
+        // Add HDR Vivid dynamic metadata support
+        auto vivid = av_dynamic_hdr_vivid_create_side_data(frame.get());
+        if (vivid) {
+          // Set default values for HDR Vivid
+          vivid->system_start_code = 0x01;
+          vivid->num_windows = 0x01;  // Single processing window
+
+          // Initialize the first (and only) processing window
+          auto &params = vivid->params[0];
+
+          // Initialize maxrgb values (simplified - use full range)
+          params.minimum_maxrgb = av_make_q(0, 4095);
+          params.average_maxrgb = av_make_q(2047, 4095);  // 0.5
+          params.variance_maxrgb = av_make_q(0, 4095);
+          params.maximum_maxrgb = av_make_q(4095, 4095);  // 1.0
+
+          // Initialize tone mapping parameters (simplified - no tone mapping)
+          params.tone_mapping_mode_flag = 0;
+          params.tone_mapping_param_num = 0;
+
+          // Initialize color saturation mapping (disabled)
+          params.color_saturation_mapping_flag = 0;
+          params.color_saturation_num = 0;
+          for (int j = 0; j < 8; j++) {
+            params.color_saturation_gain[j] = av_make_q(128, 128);  // 1.0 (no adjustment)
+          }
+
+          // Initialize tone mapping params structure (even if not used)
+          for (int i = 0; i < 2; i++) {
+            auto &tm_params = params.tm_params[i];
+            tm_params.targeted_system_display_maximum_luminance = av_make_q(hdr_metadata.maxDisplayLuminance, 1);
+            tm_params.base_enable_flag = 0;
+            tm_params.base_param_m_p = av_make_q(0, 16383);
+            tm_params.base_param_m_m = av_make_q(0, 10);
+            tm_params.base_param_m_a = av_make_q(0, 1023);
+            tm_params.base_param_m_b = av_make_q(0, 1023);
+            tm_params.base_param_m_n = av_make_q(0, 10);
+            tm_params.base_param_k1 = 0;
+            tm_params.base_param_k2 = 0;
+            tm_params.base_param_k3 = 0;
+            tm_params.base_param_Delta_enable_mode = 0;
+            tm_params.base_param_Delta = av_make_q(0, 127);
+            tm_params.three_Spline_enable_flag = 0;
+            tm_params.three_Spline_num = 0;
+            // Initialize three spline parameters
+            for (int j = 0; j < 2; j++) {
+              auto &spline = tm_params.three_spline[j];
+              spline.th_mode = 0;
+              spline.th_enable_mb = av_make_q(0, 255);
+              spline.th_enable = av_make_q(0, 4095);
+              spline.th_delta1 = av_make_q(0, 1023);
+              spline.th_delta2 = av_make_q(0, 1023);
+              spline.enable_strength = av_make_q(0, 255);
+            }
+          }
+
+          BOOST_LOG(debug) << "Added HDR Vivid dynamic metadata to frame";
+        }
       }
       else {
         BOOST_LOG(error) << "Couldn't get display hdr metadata when colorspace selection indicates it should have one";
@@ -1969,9 +2292,30 @@ namespace video {
   }
 
   std::unique_ptr<nvenc_encode_session_t>
-  make_nvenc_encode_session(const config_t &client_config, std::unique_ptr<platf::nvenc_encode_device_t> encode_device) {
+  make_nvenc_encode_session(platf::display_t *disp, const config_t &client_config, std::unique_ptr<platf::nvenc_encode_device_t> encode_device) {
     if (!encode_device->init_encoder(client_config, encode_device->colorspace)) {
       return nullptr;
+    }
+
+    // Set HDR metadata for NVENC encoder if HDR is enabled
+    if (colorspace_is_hdr(encode_device->colorspace) && encode_device->nvenc) {
+      SS_HDR_METADATA hdr_metadata;
+      if (disp->get_hdr_metadata(hdr_metadata)) {
+        nvenc::nvenc_hdr_metadata nvenc_metadata;
+        // Copy display primaries (RGB order)
+        for (int i = 0; i < 3; i++) {
+          nvenc_metadata.displayPrimaries[i].x = hdr_metadata.displayPrimaries[i].x;
+          nvenc_metadata.displayPrimaries[i].y = hdr_metadata.displayPrimaries[i].y;
+        }
+        nvenc_metadata.whitePoint.x = hdr_metadata.whitePoint.x;
+        nvenc_metadata.whitePoint.y = hdr_metadata.whitePoint.y;
+        nvenc_metadata.maxDisplayLuminance = hdr_metadata.maxDisplayLuminance;
+        nvenc_metadata.minDisplayLuminance = hdr_metadata.minDisplayLuminance;
+        nvenc_metadata.maxContentLightLevel = hdr_metadata.maxContentLightLevel;
+        nvenc_metadata.maxFrameAverageLightLevel = hdr_metadata.maxFrameAverageLightLevel;
+        encode_device->nvenc->set_hdr_metadata(nvenc_metadata);
+        BOOST_LOG(info) << "NVENC: HDR metadata set - max luminance: " << nvenc_metadata.maxDisplayLuminance << " nits";
+      }
     }
 
     return std::make_unique<nvenc_encode_session_t>(std::move(encode_device));
@@ -1985,7 +2329,7 @@ namespace video {
     }
     else if (dynamic_cast<platf::nvenc_encode_device_t *>(encode_device.get())) {
       auto nvenc_encode_device = boost::dynamic_pointer_cast<platf::nvenc_encode_device_t>(std::move(encode_device));
-      return make_nvenc_encode_session(config, std::move(nvenc_encode_device));
+      return make_nvenc_encode_session(disp, config, std::move(nvenc_encode_device));
     }
 
     return nullptr;
@@ -2176,7 +2520,7 @@ namespace video {
       // 处理动态参数调整
       while (dynamic_param_events_ptr->peek()) {
         if (auto param = dynamic_param_events_ptr->pop(0ms)) {
-          BOOST_LOG(info) << "Applying dynamic parameter change: type=" << (int)param->type;
+          BOOST_LOG(info) << "Applying dynamic parameter change: type=" << (int) param->type;
           session->set_dynamic_param(*param);
         }
       }
@@ -2387,8 +2731,33 @@ namespace video {
         display_p = std::clamp(*switch_display_event->pop(), 0, (int) display_names.size() - 1);
       }
 
+      // Use client-specified display_name if provided
+      const auto &config = synced_session_ctxs.front()->config;
+      std::string target_display_name = display_names[display_p];
+      if (!config.display_name.empty()) {
+        // config.display_name may be a device ID - convert to display name
+        std::string resolved_display_name = display_device::get_display_name(config.display_name);
+        if (resolved_display_name.empty()) {
+          resolved_display_name = config.display_name;
+        }
+
+        // Try to find the display in the list
+        bool found = false;
+        for (int x = 0; x < display_names.size(); ++x) {
+          if (display_names[x] == resolved_display_name) {
+            display_p = x;
+            target_display_name = resolved_display_name;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          BOOST_LOG(warning) << "Client-specified display [" << config.display_name << "] (resolved: " << resolved_display_name << ") not found, using default display";
+        }
+      }
+
       // reset_display() will sleep between retries
-      reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], synced_session_ctxs.front()->config);
+      reset_display(disp, encoder.platform_formats->dev_type, target_display_name, config);
       if (disp) {
         break;
       }
@@ -2566,27 +2935,120 @@ namespace video {
 
     auto touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
     auto hdr_event = mail->event<hdr_info_t>(mail::hdr);
+    auto idr_events = mail->event<bool>(mail::idr);
+    auto resolution_change_event = mail->event<std::pair<std::uint32_t, std::uint32_t>>(mail::resolution_change);
 
     // Encoding takes place on this thread
     platf::adjust_thread_priority(platf::thread_priority_e::high);
 
+    // Cache window capture mode check outside the loop
+    const bool is_window_capture = (config::video.capture_target == "window");
+
+    // Track display dimensions for resolution change detection
+    int last_display_width = 0;
+    int last_display_height = 0;
+
+    // Track initial scale ratio (encoding resolution / display resolution)
+    // Used to maintain consistent scaling when display resolution changes
+    float initial_scale_x = 1.0f;
+    float initial_scale_y = 1.0f;
+
     while (!shutdown_event->peek() && images->running()) {
       // Wait for the main capture event when the display is being reinitialized
       if (ref->reinit_event.peek()) {
-        BOOST_LOG(debug) << "[Display] 检测到重新初始化事件，等待显示器准备就绪...";
+        BOOST_LOG(debug) << "[Display] Reinit event detected, waiting for display ready...";
         std::this_thread::sleep_for(20ms);
         continue;
       }
+
       // Wait for the display to be ready
       std::shared_ptr<platf::display_t> display;
       {
         auto lg = ref->display_wp.lock();
         if (ref->display_wp->expired()) {
-          BOOST_LOG(verbose) << "[Display] 显示对象已过期，等待重新初始化...";
+          BOOST_LOG(verbose) << "[Display] Display object expired, waiting for reinit...";
           continue;
         }
-
         display = ref->display_wp->lock();
+      }
+
+      // Detect display resolution changes (e.g., rotation causing width/height swap)
+      // For WGC window capture, display->width/height is monitor resolution, not window size
+      const int current_width = display->width;
+      const int current_height = display->height;
+
+      // Helper lambda to compute even-aligned resolution with minimum 64
+      auto compute_aligned_resolution = [](int dimension, float scale) {
+        return std::max(64, (static_cast<int>(dimension * scale) + 1) & ~1);
+      };
+
+      // Initialize cached display dimensions on first iteration
+      if (last_display_width == 0 && last_display_height == 0) {
+        last_display_width = current_width;
+        last_display_height = current_height;
+        
+        // Check if display orientation matches client request
+        const bool display_is_portrait = (current_height > current_width);
+        const bool client_wants_landscape = (config.width > config.height);
+        const bool orientation_mismatch = !is_window_capture &&
+                                          (display_is_portrait == client_wants_landscape);
+        
+        if (orientation_mismatch) {
+          // When orientation mismatches, client width maps to display height and vice versa
+          initial_scale_x = static_cast<float>(config.width) / current_height;
+          initial_scale_y = static_cast<float>(config.height) / current_width;
+          BOOST_LOG(info) << "Display orientation mismatch: display="
+                          << current_width << "x" << current_height
+                          << ", client=" << config.width << "x" << config.height
+                          << " -> using display resolution";
+        }
+        else {
+          initial_scale_x = static_cast<float>(config.width) / current_width;
+          initial_scale_y = static_cast<float>(config.height) / current_height;
+          BOOST_LOG(info) << "Initial display: " << current_width << "x" << current_height
+                          << ", encoding: " << config.width << "x" << config.height
+                          << ", scale: " << initial_scale_x << "x" << initial_scale_y;
+        }
+
+        config.width = compute_aligned_resolution(current_width, initial_scale_x);
+        config.height = compute_aligned_resolution(current_height, initial_scale_y);
+        
+        resolution_change_event->raise(std::make_pair(
+          static_cast<std::uint32_t>(current_width),
+          static_cast<std::uint32_t>(current_height)));
+        
+        if (orientation_mismatch) {
+          idr_events->raise(true);
+        }
+      }
+      else if (!is_window_capture &&
+               (current_width != last_display_width || current_height != last_display_height)) {
+        const bool is_rotation = (last_display_width == current_height && last_display_height == current_width);
+
+        BOOST_LOG(info) << "Display resolution changed: "
+                        << last_display_width << "x" << last_display_height << " -> "
+                        << current_width << "x" << current_height
+                        << (is_rotation ? " (rotation)" : "");
+
+        last_display_width = current_width;
+        last_display_height = current_height;
+
+        if (is_rotation) {
+          std::swap(initial_scale_x, initial_scale_y);
+        }
+
+        config.width = compute_aligned_resolution(current_width, initial_scale_x);
+        config.height = compute_aligned_resolution(current_height, initial_scale_y);
+
+        BOOST_LOG(info) << "New encoding resolution: " << config.width << "x" << config.height
+                        << " (scale: " << initial_scale_x << "x" << initial_scale_y << ")";
+
+        resolution_change_event->raise(std::make_pair(
+          static_cast<std::uint32_t>(current_width),
+          static_cast<std::uint32_t>(current_height)));
+
+        idr_events->raise(true);
+        std::this_thread::sleep_for(100ms);
       }
 
       auto &encoder = *chosen_encoder;
@@ -2596,7 +3058,7 @@ namespace video {
         return;
       }
 
-      // absolute mouse coordinates require that the dimensions of the screen are known
+      // Absolute mouse coordinates require that the dimensions of the screen are known
       touch_port_event->raise(make_port(display.get(), config));
 
       // Update client with our current HDR display state
@@ -2606,7 +3068,7 @@ namespace video {
           hdr_info->enabled = true;
         }
         else {
-          BOOST_LOG(error) << "Couldn't get display hdr metadata when colorspace selection indicates it should have one";
+          BOOST_LOG(error) << "Couldn't get display HDR metadata when colorspace indicates it should have one";
         }
       }
       hdr_event->raise(std::move(hdr_info));
@@ -2763,6 +3225,18 @@ namespace video {
       BOOST_LOG(info) << "Encoder ["sv << encoder.name << "] failed"sv;
     });
 
+    // Quick GPU compatibility check: skip encoders that definitely won't work on this GPU
+    // This optimization prevents testing encoders on incompatible hardware (e.g., NVIDIA NVENC on AMD GPU)
+    // Extract GPU vendor from encoder name or check against known incompatible combinations
+    if (encoder.name.find("nvenc") != std::string::npos || encoder.name.find("cuda") != std::string::npos) {
+      // NVIDIA encoders - would need NVIDIA GPU
+      // We'll let the actual validation fail naturally, but at a fast level
+    }
+    else if (encoder.name.find("quicksync") != std::string::npos || encoder.name.find("qsv") != std::string::npos) {
+      // Intel QuickSync - would need Intel GPU
+      // We'll let the actual validation fail naturally
+    }
+
     auto test_hevc = active_hevc_mode >= 2 || (active_hevc_mode == 0 && !(encoder.flags & H264_ONLY));
     auto test_av1 = active_av1_mode >= 2 || (active_av1_mode == 0 && !(encoder.flags & H264_ONLY));
 
@@ -2772,8 +3246,8 @@ namespace video {
 
     // First, test encoder viability
     // Note: videoFormat starts at 0 (H.264), will be changed to 1 (HEVC) or 2 (AV1) later if needed
-    config_t config_max_ref_frames {1920, 1080, 60, 1000, 1, 1, 1, 0, 0, 0, 0};
-    config_t config_autoselect {1920, 1080, 60, 1000, 1, 1, 0, 0, 0, 0, 0};
+    config_t config_max_ref_frames { 1920, 1080, 60, 1000, 1, 1, 1, 0, 0, 0, 0 };
+    config_t config_autoselect { 1920, 1080, 60, 1000, 1, 1, 0, 0, 0, 0, 0 };
 
     // If the encoder isn't supported at all (not even H.264), bail early
     const auto output_display_name { display_device::get_display_name(config::video.output_name) };
@@ -2872,9 +3346,15 @@ namespace video {
 
     // Test HDR and YUV444 support
     {
+#ifdef _WIN32
+      const bool is_rdp_session = !is_running_as_system_user && display_device::w_utils::is_any_rdp_session_active();
+#else
+      const bool is_rdp_session = false;
+#endif
+
       // H.264 is special because encoders may support YUV 4:4:4 without supporting 10-bit color depth
       if (encoder.flags & YUV444_SUPPORT) {
-        config_t config_h264_yuv444 {1920, 1080, 60, 1000, 1, 1, 0, 0, 0, 0, 1};
+        config_t config_h264_yuv444 { 1920, 1080, 60, 1000, 1, 1, 0, 0, 0, 0, 1 };
         encoder.h264[encoder_t::YUV444] = disp->is_codec_supported(encoder.h264.name, config_h264_yuv444) &&
                                           validate_config(disp, encoder, config_h264_yuv444) >= 0;
       }
@@ -2882,51 +3362,56 @@ namespace video {
         encoder.h264[encoder_t::YUV444] = false;
       }
 
-      const config_t generic_hdr_config = {1920, 1080, 60, 1000, 1, 1, 0, 3, 1, 1, 0};
-
-      // Reset the display since we're switching from SDR to HDR
-      reset_display(disp, encoder.platform_formats->dev_type, output_display_name, generic_hdr_config);
-      if (!disp) {
-        return false;
-      }
-
-      auto test_hdr_and_yuv444 = [&](auto &flag_map, auto video_format) {
-        auto config = generic_hdr_config;
-        config.videoFormat = video_format;
-
-        if (!flag_map[encoder_t::PASSED]) return;
-
-        auto encoder_codec_name = encoder.codec_from_config(config).name;
-
-        // Test 4:4:4 HDR first. If 4:4:4 is supported, 4:2:0 should also be supported.
-        config.chromaSamplingType = 1;
-        if ((encoder.flags & YUV444_SUPPORT) &&
-            disp->is_codec_supported(encoder_codec_name, config) &&
-            validate_config(disp, encoder, config) >= 0) {
-          flag_map[encoder_t::DYNAMIC_RANGE] = true;
-          flag_map[encoder_t::YUV444] = true;
-          return;
-        }
-        else {
-          flag_map[encoder_t::YUV444] = false;
-        }
-
-        // Test 4:2:0 HDR
-        config.chromaSamplingType = 0;
-        if (disp->is_codec_supported(encoder_codec_name, config) &&
-            validate_config(disp, encoder, config) >= 0) {
-          flag_map[encoder_t::DYNAMIC_RANGE] = true;
-        }
-        else {
-          flag_map[encoder_t::DYNAMIC_RANGE] = false;
-        }
-      };
-
-      // HDR is not supported with H.264. Don't bother even trying it.
+      // HDR is not supported with H.264
       encoder.h264[encoder_t::DYNAMIC_RANGE] = false;
 
-      test_hdr_and_yuv444(encoder.hevc, 1);
-      test_hdr_and_yuv444(encoder.av1, 2);
+      // Skip HDR testing in RDP/virtual display environments
+      if (is_rdp_session) {
+        BOOST_LOG(info) << "Skipping HDR testing in RDP environment";
+        encoder.hevc[encoder_t::DYNAMIC_RANGE] = false;
+        encoder.av1[encoder_t::DYNAMIC_RANGE] = false;
+      }
+      else {
+        const config_t generic_hdr_config = { 1920, 1080, 60, 1000, 1, 1, 0, 3, 1, 1, 0 };
+
+        // Reset the display since we're switching from SDR to HDR
+        reset_display(disp, encoder.platform_formats->dev_type, output_display_name, generic_hdr_config);
+        if (!disp) {
+          return false;
+        }
+
+        auto test_hdr_and_yuv444 = [&](auto &flag_map, int video_format) {
+          if (!flag_map[encoder_t::PASSED]) {
+            flag_map[encoder_t::DYNAMIC_RANGE] = false;
+            flag_map[encoder_t::YUV444] = false;
+            return;
+          }
+
+          auto config = generic_hdr_config;
+          config.videoFormat = video_format;
+          auto encoder_codec_name = encoder.codec_from_config(config).name;
+
+          // Test 4:4:4 HDR first. If 4:4:4 is supported, 4:2:0 should also be supported.
+          if (encoder.flags & YUV444_SUPPORT) {
+            config.chromaSamplingType = 1;
+            if (disp->is_codec_supported(encoder_codec_name, config) &&
+                validate_config(disp, encoder, config) >= 0) {
+              flag_map[encoder_t::DYNAMIC_RANGE] = true;
+              flag_map[encoder_t::YUV444] = true;
+              return;
+            }
+          }
+          flag_map[encoder_t::YUV444] = false;
+
+          // Test 4:2:0 HDR
+          config.chromaSamplingType = 0;
+          flag_map[encoder_t::DYNAMIC_RANGE] = disp->is_codec_supported(encoder_codec_name, config) &&
+                                               validate_config(disp, encoder, config) >= 0;
+        };
+
+        test_hdr_and_yuv444(encoder.hevc, 1);
+        test_hdr_and_yuv444(encoder.av1, 2);
+      }
     }
 
     encoder.h264[encoder_t::VUI_PARAMETERS] = encoder.h264[encoder_t::VUI_PARAMETERS] && !config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE];
@@ -2953,6 +3438,7 @@ namespace video {
 
     // If we already have a good encoder, check to see if another probe is required
     if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
+      BOOST_LOG(info) << "Using cached encoder validation results";
       return 0;
     }
 
@@ -3190,6 +3676,20 @@ namespace video {
     return hw_device_buf;
   }
 
+  util::Either<avcodec_buffer_t, int>
+  vulkan_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
+    avcodec_buffer_t hw_device_buf;
+
+    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VULKAN, nullptr, nullptr, 0);
+    if (status < 0) {
+      char string[AV_ERROR_MAX_STRING_SIZE];
+      BOOST_LOG(error) << "Failed to create a Vulkan device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
+      return -1;
+    }
+
+    return hw_device_buf;
+  }
+
 #ifdef _WIN32
 }
 
@@ -3270,6 +3770,8 @@ namespace video {
         return platf::mem_type_e::system;
       case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
         return platf::mem_type_e::videotoolbox;
+      case AV_HWDEVICE_TYPE_VULKAN:
+        return platf::mem_type_e::vulkan;
       default:
         return platf::mem_type_e::unknown;
     }

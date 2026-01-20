@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { resolve } from 'path'
 import { defineConfig } from 'vite'
-import { ViteEjsPlugin } from 'vite-plugin-ejs'
+import { ViteEjsPlugin } from './vite-plugin-ejs-v7.js'
 import vue from '@vitejs/plugin-vue'
 import process from 'process'
 
@@ -48,6 +48,8 @@ export default defineConfig({
     outDir: resolve(assetsDstPath),
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
+    // 在 Vite 7 中，同时配置 rollupOptions 和 rolldownOptions
+    // rollupOptions 用于 HTML 文件生成，rolldownOptions 用于打包优化
     rollupOptions: {
       input: {
         apps: resolve(assetsSrcPath, 'apps.html'),
@@ -58,10 +60,12 @@ export default defineConfig({
         troubleshooting: resolve(assetsSrcPath, 'troubleshooting.html'),
         welcome: resolve(assetsSrcPath, 'welcome.html'),
       },
+    },
+    rolldownOptions: {
       output: {
         // 优化chunk命名
         chunkFileNames: 'assets/[name]-[hash].js',
-        // 优化入口文件命名
+        // 优化入口文件命名（只影响 JS 文件）
         entryFileNames: 'assets/[name]-[hash].js',
         // 优化资源文件命名
         assetFileNames: (assetInfo) => {

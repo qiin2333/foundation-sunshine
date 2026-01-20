@@ -208,11 +208,6 @@ namespace {
 using namespace std::literals;
 
 namespace platf::audio {
-  template <class T>
-  void
-  Release(T *p) {
-    p->Release();
-  }
 
   template <class T>
   void
@@ -1191,7 +1186,7 @@ namespace platf::audio {
       }
 
       if (mic_redirect_device->init() != 0) {
-        BOOST_LOG(error) << "Failed to initialize client mic redirection device";
+        BOOST_LOG(warning) << "Failed to initialize client mic redirection device";
         mic_redirect_device.reset();
         return -1;
       }
@@ -1212,7 +1207,7 @@ namespace platf::audio {
     }
 
     int
-    write_mic_data(const char *data, size_t len) {
+    write_mic_data(const char *data, size_t len, uint16_t seq = 0) {
       static std::mutex mic_device_mutex;
       std::lock_guard<std::mutex> lock(mic_device_mutex);
 
@@ -1221,7 +1216,7 @@ namespace platf::audio {
         return -1;
       }
 
-      return mic_redirect_device->write_data(data, len);
+      return mic_redirect_device->write_data(data, len, seq);
     }
   };
 }  // namespace platf::audio

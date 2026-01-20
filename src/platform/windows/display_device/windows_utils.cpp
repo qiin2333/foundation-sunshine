@@ -129,7 +129,14 @@ namespace display_device::w_utils {
       DWORD required_size_in_bytes { 0 };
       auto status { RegQueryValueExW(reg_key, L"EDID", nullptr, nullptr, nullptr, &required_size_in_bytes) };
       if (status != ERROR_SUCCESS) {
-        BOOST_LOG(error) << get_error_string(status) << " \"RegQueryValueExW\" failed when getting size.";
+        // ERROR_FILE_NOT_FOUND (2) is expected for some displays (virtual, RDP, etc.)
+        // Code has fallback mechanism, so this is not a critical error
+        if (status == ERROR_FILE_NOT_FOUND) {
+          BOOST_LOG(debug) << get_error_string(status) << " \"RegQueryValueExW\" failed when getting size (EDID not found, using fallback).";
+        }
+        else {
+          BOOST_LOG(warning) << get_error_string(status) << " \"RegQueryValueExW\" failed when getting size.";
+        }
         return false;
       }
 
@@ -137,7 +144,14 @@ namespace display_device::w_utils {
 
       status = RegQueryValueExW(reg_key, L"EDID", nullptr, nullptr, edid.data(), &required_size_in_bytes);
       if (status != ERROR_SUCCESS) {
-        BOOST_LOG(error) << get_error_string(status) << " \"RegQueryValueExW\" failed when getting size.";
+        // ERROR_FILE_NOT_FOUND (2) is expected for some displays (virtual, RDP, etc.)
+        // Code has fallback mechanism, so this is not a critical error
+        if (status == ERROR_FILE_NOT_FOUND) {
+          BOOST_LOG(debug) << get_error_string(status) << " \"RegQueryValueExW\" failed when getting size (EDID not found, using fallback).";
+        }
+        else {
+          BOOST_LOG(warning) << get_error_string(status) << " \"RegQueryValueExW\" failed when getting size.";
+        }
         return false;
       }
 
@@ -398,13 +412,23 @@ namespace display_device::w_utils {
     target_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
     target_name.header.size = sizeof(target_name);
 
-    LONG result { DisplayConfigGetDeviceInfo(&target_name.header) };
-    if (result != ERROR_SUCCESS) {
+    if (LONG result = DisplayConfigGetDeviceInfo(&target_name.header); result != ERROR_SUCCESS) {
       BOOST_LOG(error) << get_error_string(result) << " failed to get target device name!";
       return {};
     }
 
-    return target_name.flags.friendlyNameFromEdid ? platf::to_utf8(target_name.monitorFriendlyDeviceName) : std::string {};
+    // For standard EDID-based displays, use the friendly name from EDID
+    if (target_name.flags.friendlyNameFromEdid) {
+      return platf::to_utf8(target_name.monitorFriendlyDeviceName);
+    }
+
+    // For virtual displays (RDP, VMs, etc.) without EDID, use the GDI device name
+    if (auto gdi_name = get_display_name(path); !gdi_name.empty()) {
+      return gdi_name;
+    }
+
+    // Fallback: Create a synthetic friendly name based on path info
+    return "Virtual_Display_" + std::to_string(path.targetInfo.id);
   }
 
   std::string
@@ -690,7 +714,12 @@ namespace display_device::w_utils {
         const auto wts_info { reinterpret_cast<const WTSINFOEXW *>(buffer) };
         if (wts_info && wts_info->Level == 1) {
           const bool is_locked { wts_info->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK };
-          BOOST_LOG(debug) << "is_user_session_locked: " << is_locked;
+          const auto session_flags = wts_info->Data.WTSInfoExLevel1.SessionFlags;
+          
+          BOOST_LOG(info) << "Session lock check - Locked: " << is_locked 
+                           << ", SessionFlags: " << session_flags 
+                           << " (LOCK=" << WTS_SESSIONSTATE_LOCK 
+                           << ", UNLOCK=" << WTS_SESSIONSTATE_UNLOCK << ")";
           return is_locked;
         }
       }
@@ -777,6 +806,9 @@ namespace display_device::w_utils {
       BOOST_LOG(warning) << "[Check_RDP_Session] WTSEnumerateSessions failed: " << GetLastError();
       return false; // 异常默认返回false
     }
+    
+    BOOST_LOG(debug) << "[Check_RDP_Session] Checking " << sessionCount << " sessions";
+    
     // 遍历所有会话，检测是否有rdp会话
     for (DWORD i = 0; i < sessionCount; ++i) {
       WTS_SESSION_INFO si = pSessionInfo[i];
@@ -791,9 +823,14 @@ namespace display_device::w_utils {
       if (WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, si.SessionId, WTSClientProtocolType, &buffer, &bytesReturned)) {
         USHORT protocolType = *(USHORT*)buffer;
         WTSFreeMemory(buffer);
-        // BOOST_LOG(info) << "RDP Session ID: " << si.SessionId << ", Protocol: " << protocolType;
+        
+        BOOST_LOG(debug) << "[Check_RDP_Session] Session " << si.SessionId 
+                         << " - State: " << si.State 
+                         << ", Protocol: " << protocolType 
+                         << " (Console=0, RDP=2)";
+        
         if (protocolType == 2) { // RDP 协议
-          BOOST_LOG(debug) << "[Check_RDP_Session] Active RDP session detected, session ID = " << si.SessionId;
+          BOOST_LOG(info) << "[Check_RDP_Session] Active RDP session detected, session ID = " << si.SessionId;
           WTSFreeMemory(pSessionInfo);
           return true;
         }
@@ -802,7 +839,76 @@ namespace display_device::w_utils {
       }
     }
     WTSFreeMemory(pSessionInfo);
-    // BOOST_LOG(info) << "No active RDP session found.";
+    BOOST_LOG(debug) << "[Check_RDP_Session] No active RDP session found.";
+    return false;
+  }
+
+  bool
+  rotate_display(int angle, const std::string &display_name) {
+    // Validate angle: 0, 90, 180, 270
+    if (angle != 0 && angle != 90 && angle != 180 && angle != 270) {
+      BOOST_LOG(error) << "Invalid rotation angle: " << angle << ". Must be 0, 90, 180, or 270";
+      return false;
+    }
+
+    // Convert angle to Windows display orientation
+    static const DWORD angle_to_orientation[] = { DMDO_DEFAULT, DMDO_90, DMDO_180, DMDO_270 };
+    DWORD new_orientation = angle_to_orientation[angle / 90];
+
+    // Convert display name to wide string
+    std::wstring wdisplay_name;
+    LPCWSTR device_name = nullptr;
+    if (!display_name.empty()) {
+      wdisplay_name = std::wstring(display_name.begin(), display_name.end());
+      device_name = wdisplay_name.c_str();
+    }
+
+    const std::string target = display_name.empty() ? "primary display" : display_name;
+
+    // Get current display settings
+    DEVMODEW dm = {};
+    dm.dmSize = sizeof(DEVMODEW);
+    
+    if (!EnumDisplaySettingsW(device_name, ENUM_CURRENT_SETTINGS, &dm)) {
+      BOOST_LOG(error) << "Failed to get current display settings for " << target
+                       << ", error: " << GetLastError();
+      return false;
+    }
+
+    BOOST_LOG(debug) << "Current display settings: " 
+                     << dm.dmPelsWidth << "x" << dm.dmPelsHeight 
+                     << ", orientation: " << dm.dmDisplayOrientation;
+
+    DWORD current_orientation = dm.dmDisplayOrientation;
+
+    // Swap width/height if transitioning between landscape and portrait
+    bool current_is_portrait = (current_orientation == DMDO_90 || current_orientation == DMDO_270);
+    bool new_is_portrait = (new_orientation == DMDO_90 || new_orientation == DMDO_270);
+    
+    if (current_is_portrait != new_is_portrait) {
+      std::swap(dm.dmPelsWidth, dm.dmPelsHeight);
+      BOOST_LOG(debug) << "Swapping dimensions to: " << dm.dmPelsWidth << "x" << dm.dmPelsHeight;
+    }
+
+    dm.dmDisplayOrientation = new_orientation;
+    dm.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT;
+
+    // Test if settings are valid
+    if (ChangeDisplaySettingsExW(device_name, &dm, nullptr, CDS_TEST, nullptr) != DISP_CHANGE_SUCCESSFUL) {
+      BOOST_LOG(error) << "Display rotation test failed for " << target;
+      return false;
+    }
+
+    // Apply settings
+    LONG result = ChangeDisplaySettingsExW(device_name, &dm, nullptr, CDS_UPDATEREGISTRY, nullptr);
+
+    if (result == DISP_CHANGE_SUCCESSFUL) {
+      BOOST_LOG(info) << "Display rotation changed to " << angle << " degrees for " << target;
+      return true;
+    }
+
+    BOOST_LOG(error) << "Failed to change display rotation for " << target 
+                     << ": error code " << result;
     return false;
   }
 }  // namespace display_device::w_utils

@@ -3,108 +3,88 @@
     <div v-if="visible" class="cover-finder-overlay" @click.self="closeFinder">
       <div class="cover-finder-panel" @click.stop>
         <!-- 头部 -->
-        <div class="finder-header">
-          <div class="finder-title">
+        <div class="cover-finder__header">
+          <div class="cover-finder__title">
             <i class="fas fa-image me-2"></i>
-            <span>{{ $t('apps.find_cover') || '查找封面' }}</span>
+            <span>{{ $t('apps.find_cover') }}</span>
           </div>
-          <button type="button" class="finder-close" @click="closeFinder">
+          <button type="button" class="cover-finder__close" @click="closeFinder">
             <i class="fas fa-times"></i>
           </button>
         </div>
 
         <!-- 搜索框 -->
-        <div class="finder-search">
-          <div class="search-input-wrapper">
-            <i class="fas fa-search search-icon"></i>
+        <div class="cover-finder__search">
+          <div class="cover-finder__search-wrapper">
+            <i class="fas fa-search cover-finder__search-icon"></i>
             <input
               ref="searchInput"
               v-model="localSearchTerm"
               type="text"
-              class="search-input"
+              class="cover-finder__search-input"
               placeholder="输入游戏名称搜索..."
               @keydown.enter="searchCovers"
             />
-            <button v-if="localSearchTerm" class="search-clear" @click="clearSearch" type="button">
+            <button v-if="localSearchTerm" class="cover-finder__search-clear" @click="clearSearch" type="button">
               <i class="fas fa-times"></i>
             </button>
-            <button class="search-btn" @click="searchCovers" :disabled="!localSearchTerm || loading" type="button">
+            <button class="cover-finder__search-btn" @click="searchCovers" :disabled="!localSearchTerm || loading" type="button">
               <i class="fas fa-arrow-right"></i>
             </button>
           </div>
         </div>
 
         <!-- 数据源筛选 -->
-        <div class="finder-tabs">
+        <div class="cover-finder__tabs">
           <button
-            class="finder-tab"
-            :class="{ active: coverFilter === 'all' }"
-            @click.stop.prevent="setCoverFilter('all')"
+            v-for="tab in tabs"
+            :key="tab.key"
+            class="cover-finder__tab"
+            :class="{ 'cover-finder__tab--active': coverFilter === tab.key }"
+            @click.stop.prevent="coverFilter = tab.key"
           >
-            <i class="fas fa-globe"></i>
-            <span>全部</span>
-            <span class="tab-badge" v-if="coverFilter === 'all' && allCovers.length > 0">
-              {{ allCovers.length }}
-            </span>
-          </button>
-          <button
-            class="finder-tab"
-            :class="{ active: coverFilter === 'igdb' }"
-            @click.stop.prevent="setCoverFilter('igdb')"
-          >
-            <i class="fas fa-gamepad"></i>
-            <span>IGDB</span>
-            <span class="tab-badge" v-if="igdbCovers.length > 0">
-              {{ igdbCovers.length }}
-            </span>
-          </button>
-          <button
-            class="finder-tab"
-            :class="{ active: coverFilter === 'steam' }"
-            @click.stop.prevent="setCoverFilter('steam')"
-          >
-            <i class="fab fa-steam"></i>
-            <span>Steam</span>
-            <span class="tab-badge" v-if="steamCovers.length > 0">
-              {{ steamCovers.length }}
+            <i :class="tab.icon"></i>
+            <span>{{ tab.label }}</span>
+            <span class="cover-finder__tab-badge" v-if="getTabCount(tab.key) > 0">
+              {{ getTabCount(tab.key) }}
             </span>
           </button>
         </div>
 
         <!-- 内容区域 -->
-        <div class="finder-content">
+        <div class="cover-finder__content">
           <!-- 加载状态 -->
-          <div v-if="loading" class="finder-loading">
-            <div class="loading-spinner"></div>
-            <p class="loading-text">正在搜索封面...</p>
+          <div v-if="loading" class="cover-finder__loading">
+            <div class="cover-finder__loading-spinner"></div>
+            <p class="cover-finder__loading-text">正在搜索封面...</p>
           </div>
 
           <!-- 封面网格 -->
-          <div v-else-if="filteredCovers.length > 0" class="covers-grid">
+          <div v-else-if="filteredCovers.length > 0" class="cover-finder__grid">
             <div
               v-for="(cover, index) in filteredCovers"
               :key="cover.key || `cover-${index}`"
-              class="cover-card"
+              class="cover-finder__card"
               @click="selectCover(cover)"
             >
-              <div class="cover-image-wrapper">
+              <div class="cover-finder__card-image">
                 <img :src="cover.url" :alt="cover.name" loading="lazy" @error="handleImageError" />
-                <div class="cover-overlay">
+                <div class="cover-finder__card-overlay">
                   <i class="fas fa-check-circle"></i>
                 </div>
-                <div class="cover-source-badge" :class="cover.source">
+                <div class="cover-finder__card-badge" :class="`cover-finder__card-badge--${cover.source}`">
                   <i :class="cover.source === 'steam' ? 'fab fa-steam' : 'fas fa-gamepad'"></i>
                 </div>
               </div>
-              <div class="cover-info">
-                <p class="cover-name" :title="cover.name">{{ cover.name }}</p>
+              <div class="cover-finder__card-info">
+                <p class="cover-finder__card-name" :title="cover.name">{{ cover.name }}</p>
               </div>
             </div>
           </div>
 
           <!-- 无结果 -->
-          <div v-else class="finder-empty">
-            <div class="empty-icon">
+          <div v-else class="cover-finder__empty">
+            <div class="cover-finder__empty-icon">
               <i class="fas fa-search"></i>
             </div>
             <h4>未找到相关封面</h4>
@@ -113,8 +93,8 @@
         </div>
 
         <!-- 底部提示 -->
-        <div class="finder-footer">
-          <span class="footer-hint">
+        <div class="cover-finder__footer">
+          <span class="cover-finder__footer-hint">
             <i class="fas fa-info-circle me-1"></i>
             点击封面即可应用
           </span>
@@ -125,12 +105,16 @@
 </template>
 
 <script>
-import { searchSteamCovers } from '../utils/steamApi.js'
+import { searchAllCovers } from '../utils/coverSearch.js'
 
-// 缓存已加载的bucket数据
-const bucketCache = new Map()
-// 缓存已加载的游戏详情
-const gameCache = new Map()
+const PLACEHOLDER_IMAGE =
+  'data:image/svg+xml,' +
+  encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="200" height="300" viewBox="0 0 200 300">
+    <rect fill="#1a1a2e" width="200" height="300"/>
+    <text x="100" y="150" text-anchor="middle" fill="#4a4a6a" font-size="14">无法加载</text>
+  </svg>
+`)
 
 export default {
   name: 'CoverFinder',
@@ -144,6 +128,7 @@ export default {
       default: '',
     },
   },
+  emits: ['close', 'cover-selected', 'loading', 'error'],
   data() {
     return {
       coverFilter: 'all',
@@ -152,11 +137,15 @@ export default {
       steamCovers: [],
       localSearchTerm: '',
       searchAbortController: null,
+      tabs: [
+        { key: 'all', icon: 'fas fa-globe', label: '全部' },
+        { key: 'igdb', icon: 'fas fa-gamepad', label: 'IGDB' },
+        { key: 'steam', icon: 'fab fa-steam', label: 'Steam' },
+      ],
     }
   },
   computed: {
     allCovers() {
-      // 交替合并两个来源的结果
       const result = []
       const maxLen = Math.max(this.igdbCovers.length, this.steamCovers.length)
       for (let i = 0; i < maxLen; i++) {
@@ -166,24 +155,19 @@ export default {
       return result
     },
     filteredCovers() {
-      if (this.coverFilter === 'igdb') return this.igdbCovers
-      if (this.coverFilter === 'steam') return this.steamCovers
-      return this.allCovers
+      const filterMap = {
+        igdb: this.igdbCovers,
+        steam: this.steamCovers,
+        all: this.allCovers,
+      }
+      return filterMap[this.coverFilter] || this.allCovers
     },
   },
   watch: {
     visible(newVal) {
       if (newVal) {
-        this.localSearchTerm = this.searchTerm
-        this.$nextTick(() => {
-          this.$refs.searchInput?.focus()
-          this.$refs.searchInput?.select()
-        })
-        if (this.localSearchTerm) {
-          this.searchCovers()
-        }
+        this.onOpen()
       } else {
-        // 关闭时取消正在进行的请求
         this.abortPendingSearch()
       }
       document.body.style.overflow = newVal ? 'hidden' : ''
@@ -194,6 +178,26 @@ export default {
     this.abortPendingSearch()
   },
   methods: {
+    getTabCount(key) {
+      const countMap = {
+        all: this.allCovers.length,
+        igdb: this.igdbCovers.length,
+        steam: this.steamCovers.length,
+      }
+      return countMap[key] || 0
+    },
+
+    onOpen() {
+      this.localSearchTerm = this.searchTerm
+      this.$nextTick(() => {
+        this.$refs.searchInput?.focus()
+        this.$refs.searchInput?.select()
+      })
+      if (this.localSearchTerm) {
+        this.searchCovers()
+      }
+    },
+
     abortPendingSearch() {
       if (this.searchAbortController) {
         this.searchAbortController.abort()
@@ -209,10 +213,6 @@ export default {
       this.$refs.searchInput?.focus()
     },
 
-    setCoverFilter(filter) {
-      this.coverFilter = filter
-    },
-
     async searchCovers() {
       if (!this.localSearchTerm) {
         this.igdbCovers = []
@@ -220,7 +220,6 @@ export default {
         return
       }
 
-      // 取消之前的搜索请求
       this.abortPendingSearch()
       this.searchAbortController = new AbortController()
 
@@ -229,27 +228,11 @@ export default {
       this.steamCovers = []
 
       try {
-        // 同时搜索两个来源
-        const [igdbResults, steamResults] = await Promise.allSettled([
-          this.searchIGDBCovers(this.localSearchTerm, this.searchAbortController.signal),
-          searchSteamCovers(this.localSearchTerm),
-        ])
-
-        if (igdbResults.status === 'fulfilled') {
-          this.igdbCovers = igdbResults.value
-        } else if (igdbResults.reason?.name !== 'AbortError') {
-          console.error('搜索IGDB封面失败:', igdbResults.reason)
-        }
-
-        if (steamResults.status === 'fulfilled') {
-          this.steamCovers = steamResults.value
-        } else {
-          console.error('搜索Steam封面失败:', steamResults.reason)
-        }
+        const results = await searchAllCovers(this.localSearchTerm, this.searchAbortController.signal)
+        this.igdbCovers = results.igdb
+        this.steamCovers = results.steam
       } catch (error) {
-        if (error.name === 'AbortError') {
-          return // 请求被取消，不处理
-        }
+        if (error.name === 'AbortError') return
         console.error('搜索封面失败:', error)
         this.$emit('error', '搜索封面失败，请稍后重试')
       } finally {
@@ -257,83 +240,8 @@ export default {
       }
     },
 
-    async searchIGDBCovers(name, signal) {
-      if (!name) return []
-
-      const searchName = name.replaceAll(/\s+/g, '.').toLowerCase()
-      const bucket = this.getSearchBucket(name)
-
-      try {
-        // 使用缓存的bucket数据
-        let maps = bucketCache.get(bucket)
-        if (!maps) {
-          const response = await fetch(`https://lizardbyte.github.io/GameDB/buckets/${bucket}.json`, { signal })
-          if (!response.ok) throw new Error('Failed to search covers')
-          maps = await response.json()
-          bucketCache.set(bucket, maps)
-        }
-
-        const matchedIds = Object.keys(maps)
-          .filter((id) => maps[id].name.replaceAll(/\s+/g, '.').toLowerCase().startsWith(searchName))
-          .slice(0, 20)
-
-        // 并行获取游戏详情，使用缓存
-        const games = await Promise.all(
-          matchedIds.map(async (id) => {
-            // 检查缓存
-            if (gameCache.has(id)) {
-              return gameCache.get(id)
-            }
-            try {
-              const res = await fetch(`https://lizardbyte.github.io/GameDB/games/${id}.json`, { signal })
-              const game = await res.json()
-              gameCache.set(id, game)
-              return game
-            } catch {
-              return null
-            }
-          })
-        )
-
-        return games
-          .filter((game) => game?.cover?.url)
-          .map((game) => {
-            const thumb = game.cover.url
-            const hash = thumb.substring(thumb.lastIndexOf('/') + 1, thumb.lastIndexOf('.'))
-            return {
-              name: game.name,
-              key: `igdb_${game.id}`,
-              source: 'igdb',
-              url: `https://images.igdb.com/igdb/image/upload/t_cover_big/${hash}.jpg`,
-              saveUrl: `https://images.igdb.com/igdb/image/upload/t_cover_big_2x/${hash}.png`,
-            }
-          })
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          throw error
-        }
-        console.error('搜索IGDB封面失败:', error)
-        return []
-      }
-    },
-
-    getSearchBucket(name) {
-      const bucket = name
-        .substring(0, 2)
-        .toLowerCase()
-        .replaceAll(/[^a-z\d\u4e00-\u9fa5]/g, '')
-      return bucket || '@'
-    },
-
     handleImageError(event) {
-      event.target.src =
-        'data:image/svg+xml,' +
-        encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" width="200" height="300" viewBox="0 0 200 300">
-          <rect fill="#1a1a2e" width="200" height="300"/>
-          <text x="100" y="150" text-anchor="middle" fill="#4a4a6a" font-size="14">无法加载</text>
-        </svg>
-      `)
+      event.target.src = PLACEHOLDER_IMAGE
     },
 
     async selectCover(cover) {
@@ -351,8 +259,8 @@ export default {
 
           if (!response.ok) throw new Error('Failed to download cover')
 
-          const body = await response.json()
-          this.$emit('cover-selected', { path: body.path, source: 'igdb' })
+          const { path } = await response.json()
+          this.$emit('cover-selected', { path, source: 'igdb' })
         }
         this.closeFinder()
       } catch (error) {
@@ -370,12 +278,15 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="less">
+@purple-dark: #7c3aed;
+@purple-dark-deep: #5b21b6;
+@purple-light: #6366f1;
+@purple-light-deep: #4f46e5;
+
 .cover-finder-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -384,7 +295,7 @@ export default {
 }
 
 .cover-finder-panel {
-  background: linear-gradient(145deg, #1e1e2e 0%, #16161e 100%);
+  background: linear-gradient(145deg, #1e1e2e, #16161e);
   border-radius: 16px;
   width: 100%;
   max-width: 900px;
@@ -393,29 +304,46 @@ export default {
   flex-direction: column;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+
+  [data-bs-theme='light'] & {
+    background: linear-gradient(145deg, #f8faff, #f0f4ff);
+    box-shadow: 0 25px 50px -12px rgba(99, 102, 241, 0.15);
+  }
 }
 
-.finder-header {
+.cover-finder__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  [data-bs-theme='light'] & {
+    border-bottom-color: rgba(99, 102, 241, 0.1);
+  }
 }
 
-.finder-title {
+.cover-finder__title {
   display: flex;
   align-items: center;
   font-size: 1.1rem;
   font-weight: 600;
   color: #e0e0e0;
+
+  i {
+    color: @purple-dark;
+  }
+
+  [data-bs-theme='light'] & {
+    color: #1e293b;
+
+    i {
+      color: @purple-light;
+    }
+  }
 }
 
-.finder-title i {
-  color: #7c3aed;
-}
-
-.finder-close {
+.cover-finder__close {
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -424,87 +352,130 @@ export default {
   color: #888;
   cursor: pointer;
   transition: all 0.2s;
+
+  &:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+
+  [data-bs-theme='light'] & {
+    background: rgba(99, 102, 241, 0.08);
+    color: #64748b;
+
+    &:hover {
+      background: rgba(239, 68, 68, 0.15);
+    }
+  }
 }
 
-.finder-close:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-}
-
-.finder-search {
+.cover-finder__search {
   padding: 1rem 1.5rem;
+
+  &-wrapper {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0 0.5rem;
+
+    &:focus-within {
+      border-color: rgba(124, 58, 237, 0.5);
+    }
+
+    [data-bs-theme='light'] & {
+      background: #fff;
+      border-color: rgba(99, 102, 241, 0.2);
+
+      &:focus-within {
+        border-color: rgba(99, 102, 241, 0.5);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+      }
+    }
+  }
+
+  &-icon {
+    color: #666;
+    padding: 0 0.75rem;
+
+    [data-bs-theme='light'] & {
+      color: #94a3b8;
+    }
+  }
+
+  &-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e0e0e0;
+    padding: 0.85rem 0.25rem;
+
+    &::placeholder {
+      color: #555;
+    }
+
+    [data-bs-theme='light'] & {
+      color: #1e293b;
+
+      &::placeholder {
+        color: #94a3b8;
+      }
+    }
+  }
+
+  &-clear,
+  &-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  &-clear {
+    background: transparent;
+    color: #666;
+
+    &:hover {
+      color: #aaa;
+    }
+
+    [data-bs-theme='light'] & {
+      color: #94a3b8;
+
+      &:hover {
+        color: #64748b;
+      }
+    }
+  }
+
+  &-btn {
+    background: linear-gradient(135deg, @purple-dark, @purple-dark-deep);
+    color: white;
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    [data-bs-theme='light'] & {
+      background: linear-gradient(135deg, @purple-light, @purple-light-deep);
+    }
+  }
 }
 
-.search-input-wrapper {
-  display: flex;
-  align-items: center;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 0 0.5rem;
-}
-
-.search-input-wrapper:focus-within {
-  border-color: rgba(124, 58, 237, 0.5);
-}
-
-.search-icon {
-  color: #666;
-  padding: 0 0.75rem;
-}
-
-.search-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #e0e0e0;
-  padding: 0.85rem 0.25rem;
-}
-
-.search-input::placeholder {
-  color: #555;
-}
-
-.search-clear,
-.search-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.search-clear {
-  background: transparent;
-  color: #666;
-}
-
-.search-clear:hover {
-  color: #aaa;
-}
-
-.search-btn {
-  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
-  color: white;
-}
-
-.search-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.finder-tabs {
+.cover-finder__tabs {
   display: flex;
   gap: 0.5rem;
   padding: 0 1.5rem 1rem;
 }
 
-.finder-tab {
+.cover-finder__tab {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -515,186 +486,266 @@ export default {
   color: #888;
   cursor: pointer;
   transition: all 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  &--active {
+    background: linear-gradient(135deg, @purple-dark, @purple-dark-deep);
+    color: white;
+  }
+
+  [data-bs-theme='light'] & {
+    background: rgba(99, 102, 241, 0.06);
+    color: #64748b;
+
+    &:hover {
+      background: rgba(99, 102, 241, 0.1);
+    }
+
+    &--active {
+      background: linear-gradient(135deg, @purple-light, @purple-light-deep);
+      color: white;
+    }
+  }
+
+  &-badge {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.1rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.75rem;
+  }
 }
 
-.finder-tab:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.finder-tab.active {
-  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
-  color: white;
-}
-
-.tab-badge {
-  background: rgba(255, 255, 255, 0.2);
-  padding: 0.1rem 0.5rem;
-  border-radius: 10px;
-  font-size: 0.75rem;
-}
-
-.finder-content {
+.cover-finder__content {
   flex: 1;
   overflow-y: auto;
   padding: 1.5rem;
   min-height: 300px;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+  }
+
+  [data-bs-theme='light'] & {
+    &::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, 0.2);
+    }
+  }
 }
 
-.finder-loading {
+.cover-finder__loading {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
+
+  &-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(124, 58, 237, 0.2);
+    border-top-color: @purple-dark;
+    border-radius: 50%;
+    animation: cover-finder-spin 1s linear infinite;
+
+    [data-bs-theme='light'] & {
+      border-color: rgba(99, 102, 241, 0.2);
+      border-top-color: @purple-light;
+    }
+  }
+
+  &-text {
+    margin-top: 1rem;
+    color: #888;
+
+    [data-bs-theme='light'] & {
+      color: #64748b;
+    }
+  }
 }
 
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(124, 58, 237, 0.2);
-  border-top-color: #7c3aed;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
+@keyframes cover-finder-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.loading-text {
-  margin-top: 1rem;
-  color: #888;
-}
-
-.covers-grid {
+.cover-finder__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 1.25rem;
 }
 
-.cover-card {
+.cover-finder__card {
   cursor: pointer;
   transition: transform 0.2s;
+
+  &:hover {
+    transform: translateY(-4px);
+
+    .cover-finder__card-overlay {
+      opacity: 1;
+    }
+  }
+
+  &-image {
+    position: relative;
+    aspect-ratio: 2/3;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0d0d14;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    [data-bs-theme='light'] & {
+      background: #e8efff;
+    }
+  }
+
+  &-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(124, 58, 237, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+    color: white;
+    font-size: 2rem;
+
+    [data-bs-theme='light'] & {
+      background: rgba(99, 102, 241, 0.85);
+    }
+  }
+
+  &-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: white;
+
+    &--steam {
+      background: #1b2838;
+    }
+
+    &--igdb {
+      background: #9147ff;
+    }
+  }
+
+  &-info {
+    padding: 0.5rem 0;
+  }
+
+  &-name {
+    font-size: 0.8rem;
+    color: #d0d0d0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    [data-bs-theme='light'] & {
+      color: #475569;
+    }
+  }
 }
 
-.cover-card:hover {
-  transform: translateY(-4px);
-}
-
-.cover-card:hover .cover-overlay {
-  opacity: 1;
-}
-
-.cover-image-wrapper {
-  position: relative;
-  aspect-ratio: 2/3;
-  border-radius: 10px;
-  overflow: hidden;
-  background: #0d0d14;
-}
-
-.cover-image-wrapper img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.cover-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(124, 58, 237, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s;
-  color: white;
-  font-size: 2rem;
-}
-
-.cover-source-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  color: white;
-}
-
-.cover-source-badge.steam {
-  background: #1b2838;
-}
-
-.cover-source-badge.igdb {
-  background: #9147ff;
-}
-
-.cover-info {
-  padding: 0.5rem 0;
-}
-
-.cover-name {
-  font-size: 0.8rem;
-  color: #d0d0d0;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.finder-empty {
+.cover-finder__empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 3rem 2rem;
   text-align: center;
+
+  h4 {
+    color: #aaa;
+    margin: 0 0 0.5rem;
+  }
+
+  p {
+    color: #666;
+    margin: 0;
+  }
+
+  [data-bs-theme='light'] & {
+    h4 {
+      color: #475569;
+    }
+
+    p {
+      color: #94a3b8;
+    }
+  }
+
+  &-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.03);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.5rem;
+
+    i {
+      font-size: 2rem;
+      color: #4a4a6a;
+    }
+
+    [data-bs-theme='light'] & {
+      background: rgba(99, 102, 241, 0.08);
+
+      i {
+        color: #94a3b8;
+      }
+    }
+  }
 }
 
-.empty-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.03);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 1.5rem;
-}
-
-.empty-icon i {
-  font-size: 2rem;
-  color: #4a4a6a;
-}
-
-.finder-empty h4 {
-  color: #aaa;
-  margin: 0 0 0.5rem;
-}
-
-.finder-empty p {
-  color: #666;
-  margin: 0;
-}
-
-.finder-footer {
+.cover-finder__footer {
   padding: 0.75rem 1.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
 
-.footer-hint {
-  font-size: 0.8rem;
-  color: #666;
-}
+  [data-bs-theme='light'] & {
+    border-top-color: rgba(99, 102, 241, 0.1);
+  }
 
-.footer-hint i {
-  color: #7c3aed;
+  &-hint {
+    font-size: 0.8rem;
+    color: #666;
+
+    i {
+      color: @purple-dark;
+    }
+
+    [data-bs-theme='light'] & {
+      color: #64748b;
+
+      i {
+        color: @purple-light;
+      }
+    }
+  }
 }
 
 .finder-fade-enter-active,
@@ -707,21 +758,12 @@ export default {
   opacity: 0;
 }
 
-.finder-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.finder-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-}
-
 @media (max-width: 768px) {
   .cover-finder-overlay {
     padding: 1rem;
   }
 
-  .covers-grid {
+  .cover-finder__grid {
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     gap: 1rem;
   }

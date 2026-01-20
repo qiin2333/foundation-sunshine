@@ -10,6 +10,8 @@
 #include "src/config.h"
 #include "src/globals.h"
 #include "src/logging.h"
+#include "src/platform/windows/display_device/windows_utils.h"
+#include "src/platform/windows/misc.h"
 #include "src/rtsp.h"
 #include "to_string.h"
 
@@ -538,11 +540,23 @@ namespace display_device {
   boost::optional<parsed_config_t>
   make_parsed_config(const config::video_t &config, const rtsp_stream::launch_session_t &session, bool is_reconfigure) {
     parsed_config_t parsed_config;
-    parsed_config.device_id = config.output_name;
+    
+    // 优先使用客户端指定的显示器名称，如果没有则使用全局配置
+    std::string device_id_to_use = config.output_name;
+    if (auto it = session.env.find("SUNSHINE_CLIENT_DISPLAY_NAME"); it != session.env.end()) {
+      const std::string client_display_name = it->to_string();
+      if (!client_display_name.empty()) {
+        device_id_to_use = client_display_name;
+        BOOST_LOG(debug) << "使用客户端指定的显示器: " << device_id_to_use;
+      }
+    }
+    
+    parsed_config.device_id = device_id_to_use;
     parsed_config.device_prep = static_cast<parsed_config_t::device_prep_e>(config.display_device_prep);
     parsed_config.change_hdr_state = parse_hdr_option(config, session);
 
     const int custom_screen_mode = session.custom_screen_mode;
+    
     // 客户端自定义屏幕模式
     if (custom_screen_mode != -1) {
       BOOST_LOG(debug) << "客户端自定义屏幕模式: "sv << custom_screen_mode;
@@ -578,12 +592,19 @@ namespace display_device {
                      << "\n"sv;
 
     // 检查是否需要使用VDD
-    const auto requested_device_id = display_device::find_one_of_the_available_devices(config.output_name);
-    const bool is_vdd_device = (display_device::get_display_friendly_name(config.output_name) == ZAKO_NAME);
+    const auto requested_device_id = display_device::find_one_of_the_available_devices(parsed_config.device_id);
+    const bool is_vdd_device = (display_device::get_display_friendly_name(parsed_config.device_id) == ZAKO_NAME);
+    const bool needs_vdd = session.use_vdd || requested_device_id.empty() || is_vdd_device;
 
-    // 如果会话不需要VDD且指定设备存在且不是VDD设备，则跳过VDD准备
-    if (!session.use_vdd && !requested_device_id.empty() && !is_vdd_device) {
+    // 不需要VDD时直接返回
+    if (!needs_vdd) {
       BOOST_LOG(debug) << "输出设备已存在，跳过VDD准备"sv;
+      return parsed_config;
+    }
+
+    // 不是SYSTEM权限且处于RDP中，强制使用RDP虚拟显示器，不创建VDD
+    if (!is_running_as_system_user && display_device::w_utils::is_any_rdp_session_active()) {
+      BOOST_LOG(info) << "[Display] RDP环境：强制使用RDP虚拟显示器，跳过VDD准备"sv;
       return parsed_config;
     }
 

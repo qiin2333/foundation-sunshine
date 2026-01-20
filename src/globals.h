@@ -6,6 +6,10 @@
 
 #include "entry_handler.h"
 #include "thread_pool.h"
+/**
+ * @brief The encryption flag for microphone data.
+ */
+#define SS_ENC_MIC 0x08
 
 /**
  * @brief A thread pool for processing tasks.
@@ -29,6 +33,12 @@ extern nvprefs::nvprefs_interface nvprefs_instance;
 extern const std::string VDD_NAME;
 extern const std::string ZAKO_NAME;
 extern std::string zako_device_id;
+
+/**
+ * @brief Cached result of is_running_as_system() check.
+ * @details This is set once at program startup and never changes during runtime.
+ */
+extern bool is_running_as_system_user;
 #endif
 
 /**
@@ -59,6 +69,7 @@ namespace mail {
   MAIL(gamepad_feedback);
   MAIL(hdr);
   MAIL(dynamic_param_change);
+  MAIL(resolution_change);
 #undef MAIL
 
 }  // namespace mail

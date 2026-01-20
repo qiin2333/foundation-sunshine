@@ -10,7 +10,17 @@ namespace system_tray_i18n {
   
   // Menu item keys
   extern const std::string KEY_OPEN_SUNSHINE;
-  extern const std::string KEY_VDD_MONITOR_TOGGLE;
+  extern const std::string KEY_VDD_BASE_DISPLAY;
+  extern const std::string KEY_VDD_CREATE;
+  extern const std::string KEY_VDD_CLOSE;
+  extern const std::string KEY_VDD_PERSISTENT;
+  extern const std::string KEY_VDD_CONFIRM_CREATE_TITLE;
+  extern const std::string KEY_VDD_CONFIRM_CREATE_MSG;
+  extern const std::string KEY_VDD_CONFIRM_KEEP_TITLE;
+  extern const std::string KEY_VDD_CONFIRM_KEEP_MSG;
+  extern const std::string KEY_VDD_CANCEL_CREATE_LOG;
+  extern const std::string KEY_VDD_PERSISTENT_CONFIRM_TITLE;
+  extern const std::string KEY_VDD_PERSISTENT_CONFIRM_MSG;
   extern const std::string KEY_CONFIGURATION;
   extern const std::string KEY_IMPORT_CONFIG;
   extern const std::string KEY_EXPORT_CONFIG;
@@ -20,10 +30,20 @@ namespace system_tray_i18n {
   extern const std::string KEY_ENGLISH;
   extern const std::string KEY_JAPANESE;
   extern const std::string KEY_STAR_PROJECT;
+  extern const std::string KEY_VISIT_PROJECT;
+  extern const std::string KEY_VISIT_PROJECT_SUNSHINE;
+  extern const std::string KEY_VISIT_PROJECT_MOONLIGHT;
   extern const std::string KEY_HELP_US;
   extern const std::string KEY_DEVELOPER_YUNDI339;
   extern const std::string KEY_DEVELOPER_QIIN;
+  extern const std::string KEY_SPONSOR_ALKaidLab;
+  extern const std::string KEY_ADVANCED_SETTINGS;
+  extern const std::string KEY_CLOSE_APP;
+  extern const std::string KEY_CLOSE_APP_CONFIRM_TITLE;
+  extern const std::string KEY_CLOSE_APP_CONFIRM_MSG;
   extern const std::string KEY_RESET_DISPLAY_DEVICE_CONFIG;
+  extern const std::string KEY_RESET_DISPLAY_CONFIRM_TITLE;
+  extern const std::string KEY_RESET_DISPLAY_CONFIRM_MSG;
   extern const std::string KEY_RESTART;
   extern const std::string KEY_QUIT;
   

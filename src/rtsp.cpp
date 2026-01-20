@@ -429,7 +429,14 @@ namespace rtsp_stream {
 
       acceptor.set_option(boost::asio::socket_base::reuse_address { true });
 
-      acceptor.bind(tcp::endpoint(af == net::IPV4 ? tcp::v4() : tcp::v6(), port), ec);
+      auto bind_addr_str = net::get_bind_address(af);
+      const auto bind_addr = boost::asio::ip::make_address(bind_addr_str, ec);
+      if (ec) {
+        BOOST_LOG(error) << "Invalid bind address: "sv << bind_addr_str << " - " << ec.message();
+        return -1;
+      }
+
+      acceptor.bind(tcp::endpoint(bind_addr, port), ec);
       if (ec) {
         return -1;
       }
@@ -810,7 +817,7 @@ namespace rtsp_stream {
     ss << "a=x-ss-general.featureFlags:" << (uint32_t) platf::get_capabilities() << std::endl;
 
     // Always request new control stream encryption if the client supports it
-    uint32_t encryption_flags_supported = SS_ENC_CONTROL_V2 | SS_ENC_AUDIO;
+    uint32_t encryption_flags_supported = SS_ENC_CONTROL_V2 | SS_ENC_AUDIO | SS_ENC_MIC;
     uint32_t encryption_flags_requested = SS_ENC_CONTROL_V2;
 
     // Determine the encryption desired for this remote endpoint
@@ -822,13 +829,25 @@ namespace rtsp_stream {
       // If it's mandatory, also request it to enable use if the client
       // didn't explicitly opt in, but it otherwise has support.
       if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY) {
-        encryption_flags_requested |= SS_ENC_VIDEO | SS_ENC_AUDIO;
+        encryption_flags_requested |= SS_ENC_VIDEO | SS_ENC_AUDIO | SS_ENC_MIC;
+      } else {
+        // Even if not mandatory, request audio and mic encryption if encryption is enabled
+        // This ensures clients that check encryptionRequested will enable audio and MIC encryption
+        encryption_flags_requested |= SS_ENC_AUDIO | SS_ENC_MIC;
       }
     }
 
     // Report supported and required encryption flags
     ss << "a=x-ss-general.encryptionSupported:" << encryption_flags_supported << std::endl;
     ss << "a=x-ss-general.encryptionRequested:" << encryption_flags_requested << std::endl;
+    
+    // 记录加密请求状态用于调试
+    BOOST_LOG(info) << "RTSP DESCRIBE encryption flags: supported=0x" << std::hex << encryption_flags_supported << std::dec
+                    << ", requested=0x" << std::hex << encryption_flags_requested << std::dec
+                    << " (CONTROL_V2=" << ((encryption_flags_requested & SS_ENC_CONTROL_V2) ? "1" : "0")
+                    << ", VIDEO=" << ((encryption_flags_requested & SS_ENC_VIDEO) ? "1" : "0")
+                    << ", AUDIO=" << ((encryption_flags_requested & SS_ENC_AUDIO) ? "1" : "0")
+                    << ", MIC=" << ((encryption_flags_requested & SS_ENC_MIC) ? "1" : "0") << ")";
 
     if (video::last_encoder_probe_supported_ref_frames_invalidation) {
       ss << "a=x-nv-video[0].refPicInvalidation:1"sv << std::endl;
@@ -848,10 +867,12 @@ namespace rtsp_stream {
       ss << "a=fmtp:97 surround-params="sv << session.surround_params << std::endl;
     }
 
-    // 添加麦克风流支持
-    ss << "m=audio " << net::map_port(stream::MIC_STREAM_PORT) << " RTP/AVP 96" << std::endl;
-    ss << "a=rtpmap:96 opus/48000/2" << std::endl;
-    ss << "a=fmtp:96 minptime=10;useinbandfec=1" << std::endl;
+    // 添加麦克风流支持（仅在启用时）
+    if (config::audio.stream_mic) {
+      ss << "m=audio " << net::map_port(stream::MIC_STREAM_PORT) << " RTP/AVP 96" << std::endl;
+      ss << "a=rtpmap:96 opus/48000/2" << std::endl;
+      ss << "a=fmtp:96 minptime=10;useinbandfec=1" << std::endl;
+    }
 
     for (int x = 0; x < audio::MAX_STREAM_CONFIG; ++x) {
       auto &stream_config = audio::stream_configs[x];
@@ -904,16 +925,20 @@ namespace rtsp_stream {
 
     std::uint16_t port;
     if (type == "audio"sv) {
+      session.setup_audio = true;
       port = net::map_port(stream::AUDIO_STREAM_PORT);
     }
     else if (type == "video"sv) {
+      session.setup_video = true;
       port = net::map_port(stream::VIDEO_STREAM_PORT);
     }
     else if (type == "control"sv) {
+      session.setup_control = true;
       port = net::map_port(stream::CONTROL_PORT);
     }
     else if (type == "mic"sv) {
       session.enable_mic = true;
+      session.setup_mic = true;
       port = net::map_port(stream::MIC_STREAM_PORT);
     }
     else {
@@ -1020,45 +1045,80 @@ namespace rtsp_stream {
     args.try_emplace("x-ss-general.encryptionEnabled"sv, "0"sv);
     args.try_emplace("x-ss-video[0].chromaSamplingType"sv, "0"sv);
     args.try_emplace("x-ss-video[0].intraRefresh"sv, "0"sv);
+    args.try_emplace("x-nv-video[0].clientRefreshRateX100"sv, "0"sv);  // NTSC framerate support (e.g., 5994 = 59.94fps)
 
     stream::config_t config;
 
     std::int64_t configuredBitrateKbps;
     config.audio.flags[audio::config_t::HOST_AUDIO] = session.host_audio;
+    auto getArg = [&args](std::string_view key) {
+      return util::from_view(args.at(key));
+    };
+
     try {
-      config.audio.channels = util::from_view(args.at("x-nv-audio.surround.numChannels"sv));
-      config.audio.mask = util::from_view(args.at("x-nv-audio.surround.channelMask"sv));
-      config.audio.packetDuration = util::from_view(args.at("x-nv-aqos.packetDuration"sv));
+      config.audio.channels = getArg("x-nv-audio.surround.numChannels"sv);
+      config.audio.mask = getArg("x-nv-audio.surround.channelMask"sv);
+      config.audio.packetDuration = getArg("x-nv-aqos.packetDuration"sv);
+      config.audio.flags[audio::config_t::HIGH_QUALITY] = getArg("x-nv-audio.surround.AudioQuality"sv);
 
-      config.audio.flags[audio::config_t::HIGH_QUALITY] =
-        util::from_view(args.at("x-nv-audio.surround.AudioQuality"sv));
-
-      config.controlProtocolType = util::from_view(args.at("x-nv-general.useReliableUdp"sv));
-      config.packetsize = util::from_view(args.at("x-nv-video[0].packetSize"sv));
-      config.minRequiredFecPackets = util::from_view(args.at("x-nv-vqos[0].fec.minRequiredFecPackets"sv));
-      config.mlFeatureFlags = util::from_view(args.at("x-ml-general.featureFlags"sv));
-      config.audioQosType = util::from_view(args.at("x-nv-aqos.qosTrafficType"sv));
-      config.videoQosType = util::from_view(args.at("x-nv-vqos[0].qosTrafficType"sv));
-      config.encryptionFlagsEnabled = util::from_view(args.at("x-ss-general.encryptionEnabled"sv));
+      config.controlProtocolType = getArg("x-nv-general.useReliableUdp"sv);
+      config.packetsize = getArg("x-nv-video[0].packetSize"sv);
+      config.minRequiredFecPackets = getArg("x-nv-vqos[0].fec.minRequiredFecPackets"sv);
+      config.mlFeatureFlags = getArg("x-ml-general.featureFlags"sv);
+      config.audioQosType = getArg("x-nv-aqos.qosTrafficType"sv);
+      config.videoQosType = getArg("x-nv-vqos[0].qosTrafficType"sv);
+      config.encryptionFlagsEnabled = getArg("x-ss-general.encryptionEnabled"sv);
 
       // Legacy clients use nvFeatureFlags to indicate support for audio encryption
-      if (util::from_view(args.at("x-nv-general.featureFlags"sv)) & 0x20) {
+      if (getArg("x-nv-general.featureFlags"sv) & 0x20) {
         config.encryptionFlagsEnabled |= SS_ENC_AUDIO;
       }
 
-      config.monitor.height = util::from_view(args.at("x-nv-video[0].clientViewportHt"sv));
-      config.monitor.width = util::from_view(args.at("x-nv-video[0].clientViewportWd"sv));
-      config.monitor.framerate = util::from_view(args.at("x-nv-video[0].maxFPS"sv));
-      config.monitor.bitrate = util::from_view(args.at("x-nv-vqos[0].bw.maximumBitrateKbps"sv));
-      config.monitor.slicesPerFrame = util::from_view(args.at("x-nv-video[0].videoEncoderSlicesPerFrame"sv));
-      config.monitor.numRefFrames = util::from_view(args.at("x-nv-video[0].maxNumReferenceFrames"sv));
-      config.monitor.encoderCscMode = util::from_view(args.at("x-nv-video[0].encoderCscMode"sv));
-      config.monitor.videoFormat = util::from_view(args.at("x-nv-vqos[0].bitStreamFormat"sv));
-      config.monitor.dynamicRange = util::from_view(args.at("x-nv-video[0].dynamicRangeMode"sv));
-      config.monitor.chromaSamplingType = util::from_view(args.at("x-ss-video[0].chromaSamplingType"sv));
-      config.monitor.enableIntraRefresh = util::from_view(args.at("x-ss-video[0].intraRefresh"sv));
+      auto &monitor = config.monitor;
+      monitor.height = getArg("x-nv-video[0].clientViewportHt"sv);
+      monitor.width = getArg("x-nv-video[0].clientViewportWd"sv);
+      monitor.framerate = getArg("x-nv-video[0].maxFPS"sv);
+      monitor.bitrate = getArg("x-nv-vqos[0].bw.maximumBitrateKbps"sv);
+      monitor.slicesPerFrame = getArg("x-nv-video[0].videoEncoderSlicesPerFrame"sv);
+      monitor.numRefFrames = getArg("x-nv-video[0].maxNumReferenceFrames"sv);
+      monitor.encoderCscMode = getArg("x-nv-video[0].encoderCscMode"sv);
+      monitor.videoFormat = getArg("x-nv-vqos[0].bitStreamFormat"sv);
+      monitor.dynamicRange = getArg("x-nv-video[0].dynamicRangeMode"sv);
+      monitor.chromaSamplingType = getArg("x-ss-video[0].chromaSamplingType"sv);
+      monitor.enableIntraRefresh = getArg("x-ss-video[0].intraRefresh"sv);
 
-      configuredBitrateKbps = util::from_view(args.at("x-ml-video.configuredBitrateKbps"sv));
+      int clientRefreshRateX100 = getArg("x-nv-video[0].clientRefreshRateX100"sv);
+
+      // Only use clientRefreshRateX100 if it's within 2% of maxFPS
+      bool useClientRefreshRate = false;
+      if (clientRefreshRateX100 > 0 && monitor.framerate > 0) {
+        double ratio = (clientRefreshRateX100 / 100.0) / monitor.framerate;
+        useClientRefreshRate = (ratio > 0.98 && ratio < 1.02);
+      }
+
+      if (useClientRefreshRate) {
+        int remainder = clientRefreshRateX100 % 100;
+        monitor.frameRateNum = (remainder == 0) ? clientRefreshRateX100 / 100 : clientRefreshRateX100;
+        monitor.frameRateDen = (remainder == 0) ? 1 : 100;
+
+        BOOST_LOG(info) << "Client framerate: " << clientRefreshRateX100 / 100.0 << " fps ("
+                        << monitor.frameRateNum << "/" << monitor.frameRateDen << ")";
+      }
+      else {
+        monitor.frameRateNum = monitor.framerate;
+        monitor.frameRateDen = 1;
+      }
+
+      configuredBitrateKbps = getArg("x-ml-video.configuredBitrateKbps"sv);
+
+      // Set display_name from session environment or use global configuration
+      if (auto it = session.env.find("SUNSHINE_CLIENT_DISPLAY_NAME"); it != session.env.end()) {
+        monitor.display_name = it->to_string();
+        BOOST_LOG(info) << "Session using specified display: " << monitor.display_name;
+      }
+      else {
+        monitor.display_name = config::video.output_name;
+      }
     }
     catch (std::out_of_range &) {
       respond(sock, session, &option, 400, "BAD REQUEST", req->sequenceNumber, {});
@@ -1141,14 +1201,23 @@ namespace rtsp_stream {
       return;
     }
 
-    // Check that any required encryption is enabled
-    auto encryption_mode = net::encryption_mode_for_address(sock.remote_endpoint().address());
-    if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY &&
-        (config.encryptionFlagsEnabled & (SS_ENC_VIDEO | SS_ENC_AUDIO)) != (SS_ENC_VIDEO | SS_ENC_AUDIO)) {
-      BOOST_LOG(error) << "Rejecting client that cannot comply with mandatory encryption requirement"sv;
+    // 检测是否仅控制流会话（只有 control 流被设置，没有 video 和 audio）
+    session.control_only = session.setup_control && !session.setup_video && !session.setup_audio;
+    if (session.control_only) {
+      BOOST_LOG(info) << "Control-only session detected: client ["sv << session.client_name << "] will only provide input control"sv;
+    }
 
-      respond(sock, session, &option, 403, "Forbidden", req->sequenceNumber, {});
-      return;
+    // Check that any required encryption is enabled
+    // 对于仅控制流会话，跳过视频/音频加密检查
+    if (!session.control_only) {
+      auto encryption_mode = net::encryption_mode_for_address(sock.remote_endpoint().address());
+      if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY &&
+          (config.encryptionFlagsEnabled & (SS_ENC_VIDEO | SS_ENC_AUDIO)) != (SS_ENC_VIDEO | SS_ENC_AUDIO)) {
+        BOOST_LOG(error) << "Rejecting client that cannot comply with mandatory encryption requirement"sv;
+
+        respond(sock, session, &option, 403, "Forbidden", req->sequenceNumber, {});
+        return;
+      }
     }
 
     auto stream_session = stream::session::alloc(config, session);

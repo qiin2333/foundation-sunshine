@@ -19,19 +19,22 @@ namespace video {
 
   // 动态参数调节类型
   enum class dynamic_param_type_e : int {
-    BITRATE,           // 码率 (Kbps)
-    QP,                // 量化参数
-    FEC_PERCENTAGE,    // FEC百分比
-    PRESET,            // 编码预设
-    ADAPTIVE_QUANTIZATION, // 自适应量化
-    MULTI_PASS,        // 多遍编码
-    VBV_BUFFER_SIZE,   // VBV缓冲区大小
+    RESOLUTION,        // 分辨率 - 值：2个int (width, height)
+    FPS,               // 帧率 - 值：1个float
+    BITRATE,           // 码率 (Kbps) - 值：1个int
+    QP,                // 量化参数 - 值：1个int
+    FEC_PERCENTAGE,    // FEC百分比 - 值：1个int
+    PRESET,            // 编码预设 - 值：1个int
+    ADAPTIVE_QUANTIZATION, // 自适应量化 - 值：1个bool
+    MULTI_PASS,        // 多遍编码 - 值：1个int
+    VBV_BUFFER_SIZE,   // VBV缓冲区大小 - 值：1个int
     MAX_PARAM_TYPE
   };
 
   // 动态参数值联合体
   union dynamic_param_value_t {
     int int_value;
+    int int_array_value[2];
     bool bool_value;
     float float_value;
   };
@@ -75,6 +78,10 @@ namespace video {
     // When frameRateDen is 0 or 1, use integer framerate
     int frameRateNum = 0;  // Framerate numerator (0 = use integer framerate)
     int frameRateDen = 1;  // Framerate denominator
+
+    // Display name for screen capture (specified by client)
+    // If empty, use the default display from global configuration
+    std::string display_name;
 
     // Helper to get effective framerate as double
     double get_effective_framerate() const {

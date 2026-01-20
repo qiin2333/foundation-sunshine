@@ -30,7 +30,7 @@
               class="view-toggle-btn"
               :class="{ active: viewMode === 'grid' }"
               @click="viewMode = 'grid'"
-              :title="'网格视图'"
+              title="网格视图"
             >
               <i class="fas fa-th"></i>
             </button>
@@ -38,7 +38,7 @@
               class="view-toggle-btn"
               :class="{ active: viewMode === 'list' }"
               @click="viewMode = 'list'"
-              :title="'列表视图'"
+              title="列表视图"
             >
               <i class="fas fa-list"></i>
             </button>
@@ -48,127 +48,143 @@
             <i class="fas fa-plus"></i>
           </button>
           <button
+            v-if="isTauriEnv()"
+            class="cute-btn cute-btn-info"
+            @click="scanDirectory(true)"
+            :disabled="isScanning"
+            title="扫描目录添加应用"
+          >
+            <i class="fas" :class="isScanning ? 'fa-spinner fa-spin' : 'fa-folder-open'"></i>
+          </button>
+          <button
             class="cute-btn cute-btn-secondary"
             data-bs-toggle="modal"
             data-bs-target="#envVarsModal"
-            :title="'环境变量说明'"
+            title="环境变量说明"
           >
             <i class="fas fa-info-circle"></i>
           </button>
-          <button class="cute-btn cute-btn-success" @click="save" :title="$t('_common.save')">
+          <button 
+            class="cute-btn cute-btn-success" 
+            :class="{ 'has-changes': hasUnsavedChanges() }"
+            @click="save" 
+            :disabled="!hasUnsavedChanges() || isSaving"
+            :title="hasUnsavedChanges() ? $t('_common.save') : $t('_common.no_changes')"
+          >
             <i class="fas fa-save"></i>
+            <span v-if="hasUnsavedChanges()" class="unsaved-indicator"></span>
           </button>
         </div>
       </div>
 
       <!-- 应用卡片列表 -->
       <div class="apps-grid-container">
-        <!-- 网格视图 -->
-        <template v-if="viewMode === 'grid'">
-          <draggable
-            v-if="!searchQuery"
-            v-model="apps"
-            item-key="name"
-            class="apps-grid"
-            :animation="300"
-            :delay="0"
-            :disabled="false"
-            ghost-class="app-card-ghost"
-            chosen-class="app-card-chosen"
-            drag-class="app-card-drag"
-            @start="onDragStart"
-            @end="onDragEnd"
-          >
-            <template #item="{ element: app, index }">
-              <AppCard
-                :app="app"
-                :draggable="true"
-                :is-drag-result="false"
-                :is-dragging="isDragging"
-                @edit="editApp(index)"
-                @delete="showDeleteForm(index)"
-                @copy-success="handleCopySuccess"
-                @copy-error="handleCopyError"
-              />
-            </template>
-          </draggable>
-
-          <div v-else class="apps-grid">
-            <AppCard
-              v-for="(app, index) in filteredApps"
-              :key="'search-' + index"
-              :app="app"
-              :draggable="false"
-              :is-search-result="true"
-              :is-dragging="false"
-              @edit="editApp(getOriginalIndex(app, index))"
-              @delete="showDeleteForm(getOriginalIndex(app, index))"
-              @copy-success="handleCopySuccess"
-              @copy-error="handleCopyError"
-            />
-          </div>
-        </template>
-
-        <!-- 列表视图 -->
-        <template v-else>
-          <draggable
-            v-if="!searchQuery"
-            v-model="apps"
-            item-key="name"
-            class="apps-list"
-            :animation="300"
-            :delay="0"
-            :disabled="false"
-            ghost-class="app-list-item-ghost"
-            chosen-class="app-list-item-chosen"
-            drag-class="app-list-item-drag"
-            @start="onDragStart"
-            @end="onDragEnd"
-          >
-            <template #item="{ element: app, index }">
-              <AppListItem
-                :app="app"
-                :draggable="true"
-                :is-dragging="isDragging"
-                @edit="editApp(index)"
-                @delete="showDeleteForm(index)"
-                @copy-success="handleCopySuccess"
-                @copy-error="handleCopyError"
-              />
-            </template>
-          </draggable>
-
-          <div v-else class="apps-list">
-            <AppListItem
-              v-for="(app, index) in filteredApps"
-              :key="'search-' + index"
-              :app="app"
-              :draggable="false"
-              :is-search-result="true"
-              :is-dragging="false"
-              @edit="editApp(getOriginalIndex(app, index))"
-              @delete="showDeleteForm(getOriginalIndex(app, index))"
-              @copy-success="handleCopySuccess"
-              @copy-error="handleCopyError"
-            />
-          </div>
-        </template>
-
-        <!-- 空状态 -->
-        <div
-          v-if="(searchQuery && filteredApps.length === 0) || (!searchQuery && apps.length === 0)"
-          class="empty-state"
+        <!-- 网格视图 - 拖拽模式 -->
+        <draggable
+          v-if="viewMode === 'grid' && !searchQuery"
+          v-model="apps"
+          item-key="name"
+          class="apps-grid"
+          :animation="300"
+          :delay="0"
+          :disabled="false"
+          ghost-class="app-card-ghost"
+          chosen-class="app-card-chosen"
+          drag-class="app-card-drag"
+          @start="onDragStart"
+          @end="onDragEnd"
         >
+          <template #item="{ element: app, index }">
+            <AppCard
+              :app="app"
+              :draggable="true"
+              :is-drag-result="false"
+              :is-dragging="isDragging"
+              @edit="editApp(index)"
+              @delete="showDeleteForm(index)"
+              @copy-success="handleCopySuccess"
+              @copy-error="handleCopyError"
+            />
+          </template>
+        </draggable>
+
+        <!-- 网格视图 - 搜索模式 -->
+        <div v-else-if="viewMode === 'grid' && searchQuery" class="apps-grid">
+          <AppCard
+            v-for="(app, index) in filteredApps"
+            :key="`search-grid-${app.name}-${index}`"
+            :app="app"
+            :draggable="false"
+            :is-search-result="true"
+            :is-dragging="false"
+            @edit="editApp(getOriginalIndex(app, index))"
+            @delete="showDeleteForm(getOriginalIndex(app, index))"
+            @copy-success="handleCopySuccess"
+            @copy-error="handleCopyError"
+          />
+        </div>
+
+        <!-- 列表视图 - 拖拽模式 -->
+        <draggable
+          v-else-if="viewMode === 'list' && !searchQuery"
+          v-model="apps"
+          item-key="name"
+          class="apps-list"
+          :animation="300"
+          :delay="0"
+          :disabled="false"
+          ghost-class="app-list-item-ghost"
+          chosen-class="app-list-item-chosen"
+          drag-class="app-list-item-drag"
+          @start="onDragStart"
+          @end="onDragEnd"
+        >
+          <template #item="{ element: app, index }">
+            <AppListItem
+              :app="app"
+              :draggable="true"
+              :is-dragging="isDragging"
+              @edit="editApp(index)"
+              @delete="showDeleteForm(index)"
+              @copy-success="handleCopySuccess"
+              @copy-error="handleCopyError"
+            />
+          </template>
+        </draggable>
+
+        <!-- 列表视图 - 搜索模式 -->
+        <div v-else-if="viewMode === 'list' && searchQuery" class="apps-list">
+          <AppListItem
+            v-for="(app, index) in filteredApps"
+            :key="`search-list-${app.name}-${index}`"
+            :app="app"
+            :draggable="false"
+            :is-search-result="true"
+            :is-dragging="false"
+            @edit="editApp(getOriginalIndex(app, index))"
+            @delete="showDeleteForm(getOriginalIndex(app, index))"
+            @copy-success="handleCopySuccess"
+            @copy-error="handleCopyError"
+          />
+        </div>
+
+        <!-- 空状态 - 搜索无结果 -->
+        <div v-if="searchQuery && filteredApps.length === 0" class="empty-state">
+          <div class="empty-icon">
+            <i class="fas fa-search"></i>
+          </div>
+          <h3 class="empty-title">未找到匹配的应用</h3>
+          <p class="empty-subtitle">尝试使用不同的搜索关键词</p>
+        </div>
+
+        <!-- 空状态 - 无应用 -->
+        <div v-if="!searchQuery && apps.length === 0 && isLoaded" class="empty-state">
           <div class="empty-icon">
             <i class="fas fa-rocket"></i>
           </div>
-          <h3 class="empty-title">
-            {{ searchQuery ? '未找到匹配的应用' : '暂无应用' }}
-          </h3>
-          <p class="empty-subtitle">
-            {{ searchQuery ? '尝试使用不同的搜索关键词' : '点击下方按钮添加第一个应用' }}
-          </p>
-          <button v-if="!searchQuery" class="btn btn-primary" @click="newApp">
+          <h3 class="empty-title">暂无应用</h3>
+          <p class="empty-subtitle">点击下方按钮添加第一个应用</p>
+          <button class="btn btn-primary" @click="newApp">
             <i class="fas fa-plus me-1"></i>{{ $t('apps.add_new') }}
           </button>
         </div>
@@ -193,12 +209,24 @@
         </button>
       </div>
 
+      <!-- 扫描结果模态框 -->
+      <ScanResultModal
+        :show="showScanResult"
+        :apps="scannedApps"
+        :saving="isSaving"
+        @close="closeScanResult"
+        @edit="handleScanEdit"
+        @quick-add="quickAddScannedApp"
+        @remove="removeScannedApp"
+        @add-all="addAllScannedApps"
+      />
+
       <!-- 环境变量说明模态框 -->
-      <div class="modal fade" id="envVarsModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+      <div id="envVarsModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg env-vars-modal">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title" id="envVarsModalLabel">
+              <h5 id="envVarsModalLabel" class="modal-title">
                 <i class="fas fa-info-circle me-2"></i>{{ $t('apps.env_vars_about') }}
               </h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -212,13 +240,15 @@
               </div>
               <div class="env-vars-table">
                 <div class="table-responsive">
-                  <table class="table">
+                  <table class="table table-sm">
                     <thead>
                       <tr>
                         <th>
-                          <strong>{{ $t('apps.env_var_name') }}</strong>
+                          <i class="fas fa-code me-1"></i>{{ $t('apps.env_var_name') }}
                         </th>
-                        <th><strong>说明</strong></th>
+                        <th>
+                          <i class="fas fa-info-circle me-1"></i>{{ $t('_common.description') }}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -233,26 +263,32 @@
                 </div>
               </div>
               <div class="mt-3">
-                <div class="form-text" v-if="platform === 'windows'">
-                  <strong>{{ $t('apps.env_qres_example') }}</strong>
-                  <pre class="code-example">
+                <template v-if="platform === 'windows'">
+                  <div class="form-text">
+                    <strong>{{ $t('apps.env_qres_example') }}</strong>
+                    <pre class="code-example">
 cmd /C &lt;{{
-                      $t('apps.env_qres_path')
-                    }}&gt;\QRes.exe /X:%SUNSHINE_CLIENT_WIDTH% /Y:%SUNSHINE_CLIENT_HEIGHT% /R:%SUNSHINE_CLIENT_FPS%</pre
-                  >
-                </div>
-                <div class="form-text" v-else-if="platform === 'linux'">
-                  <strong>{{ $t('apps.env_xrandr_example') }}</strong>
-                  <pre class="code-example">
+                        $t('apps.env_qres_path')
+                      }}&gt;\QRes.exe /X:%SUNSHINE_CLIENT_WIDTH% /Y:%SUNSHINE_CLIENT_HEIGHT% /R:%SUNSHINE_CLIENT_FPS%</pre
+                    >
+                  </div>
+                </template>
+                <template v-else-if="platform === 'linux'">
+                  <div class="form-text">
+                    <strong>{{ $t('apps.env_xrandr_example') }}</strong>
+                    <pre class="code-example">
 sh -c "xrandr --output HDMI-1 --mode \"${SUNSHINE_CLIENT_WIDTH}x${SUNSHINE_CLIENT_HEIGHT}\" --rate ${SUNSHINE_CLIENT_FPS}"</pre
-                  >
-                </div>
-                <div class="form-text" v-else-if="platform === 'macos'">
-                  <strong>{{ $t('apps.env_displayplacer_example') }}</strong>
-                  <pre class="code-example">
+                    >
+                  </div>
+                </template>
+                <template v-else-if="platform === 'macos'">
+                  <div class="form-text">
+                    <strong>{{ $t('apps.env_displayplacer_example') }}</strong>
+                    <pre class="code-example">
 sh -c "displayplacer "id:&lt;screenId&gt; res:${SUNSHINE_CLIENT_WIDTH}x${SUNSHINE_CLIENT_HEIGHT} hz:${SUNSHINE_CLIENT_FPS} scaling:on origin:(0,0) degree:0""</pre
-                  >
-                </div>
+                    >
+                  </div>
+                </template>
               </div>
             </div>
             <div class="modal-footer">
@@ -275,19 +311,21 @@ sh -c "displayplacer "id:&lt;screenId&gt; res:${SUNSHINE_CLIENT_WIDTH}x${SUNSHIN
 </template>
 
 <script setup>
-import { onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import draggable from 'vuedraggable-es'
 import Navbar from '../components/layout/Navbar.vue'
 import AppEditor from '../components/AppEditor.vue'
 import AppCard from '../components/AppCard.vue'
 import AppListItem from '../components/AppListItem.vue'
+import ScanResultModal from '../components/ScanResultModal.vue'
 import { useApps } from '../composables/useApps.js'
 import { initFirebase, trackEvents } from '../config/firebase.js'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
-// 使用组合式函数
+const isLoaded = ref(false)
+
 const {
   apps,
   filteredApps,
@@ -298,13 +336,14 @@ const {
   isDragging,
   viewMode,
   message,
-  messageType,
   envVars,
   debouncedSearch,
   messageClass,
+  isScanning,
+  scannedApps,
+  showScanResult,
   loadApps,
   loadPlatform,
-  performSearch,
   clearSearch,
   getOriginalIndex,
   newApp,
@@ -312,52 +351,55 @@ const {
   closeAppEditor,
   handleSaveApp,
   showDeleteForm,
-  deleteApp,
   save,
+  hasUnsavedChanges,
   onDragStart,
   onDragEnd,
-  showMessage,
+  scanDirectory,
+  addScannedApp,
+  addAllScannedApps,
+  closeScanResult,
+  removeScannedApp,
+  quickAddScannedApp,
+  isTauriEnv,
   getMessageIcon,
   handleCopySuccess,
   handleCopyError,
   init,
 } = useApps()
 
-// 初始化
-onMounted(async () => {
-  // 初始化Firebase Analytics
-  initFirebase()
-
-  // 记录页面访问
-  trackEvents.pageView('applications')
-
-  // 初始化组合式函数
-  init(t)
-
-  // 初始化环境变量模态框
+const initEnvVarsModal = () => {
   try {
     const modalElement = document.getElementById('envVarsModal')
     if (modalElement && window.bootstrap?.Modal) {
-      // 使用全局 Bootstrap 对象（已在 init.js 中导入并设置到 window.bootstrap）
       new window.bootstrap.Modal(modalElement)
     }
   } catch (error) {
     console.warn('Environment variables modal initialization failed:', error)
   }
+}
 
-  // 加载数据
-  await loadApps()
-  await loadPlatform()
+onMounted(async () => {
+  initFirebase()
+  trackEvents.pageView('applications')
+  init(t)
+  initEnvVarsModal()
+
+  await Promise.all([loadApps(), loadPlatform()])
+  isLoaded.value = true
 })
 
-// 监听搜索查询变化
 watch(searchQuery, () => {
-  if (debouncedSearch.value) {
-    debouncedSearch.value()
-  }
+  debouncedSearch.value?.()
 })
+
+// 处理扫描结果编辑
+const handleScanEdit = (app) => {
+  addScannedApp(app)
+  closeScanResult()
+}
 </script>
 
-<style scoped>
-@import '../styles/apps.css';
+<style>
+@import '../styles/apps.less';
 </style>

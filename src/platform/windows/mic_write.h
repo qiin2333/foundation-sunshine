@@ -19,6 +19,16 @@
 struct OpusDecoder;
 
 namespace platf::audio {
+  
+  // COM interface Release helper for safe_ptr
+  template<typename T>
+  inline void Release(T *p) {
+    if (p) p->Release();
+  }
+  
+  // COM interface smart pointer types
+  using device_enum_t = util::safe_ptr<IMMDeviceEnumerator, Release<IMMDeviceEnumerator>>;
+  using audio_client_t = util::safe_ptr<IAudioClient, Release<IAudioClient>>;
 
   // Forward declarations for types used in mic_write_wasapi_t
   enum class match_field_e {
@@ -58,10 +68,11 @@ namespace platf::audio {
      * @brief Write audio data to the virtual audio device
      * @param data Pointer to the audio data (OPUS encoded)
      * @param len Length of the audio data in bytes
+     * @param seq Sequence number for FEC recovery (0 = unknown)
      * @return Number of bytes written, or -1 on error
      */
     int
-    write_data(const char *data, size_t len);
+    write_data(const char *data, size_t len, uint16_t seq = 0);
 
     /**
      * @brief Test write functionality with silent audio
@@ -172,8 +183,8 @@ namespace platf::audio {
     restore_original_input_device();
 
     // Member variables
-    std::unique_ptr<IMMDeviceEnumerator> device_enum;
-    std::unique_ptr<IAudioClient> audio_client;
+    device_enum_t device_enum;
+    audio_client_t audio_client;
     IAudioRenderClient *audio_render = nullptr;
     OpusDecoder *opus_decoder = nullptr;
     HANDLE mmcss_task_handle = nullptr;
@@ -186,6 +197,15 @@ namespace platf::audio {
       bool input_device_changed = false;
       bool settings_stored = false;
     } restoration_state;
+
+    // FEC recovery state
+    uint16_t last_seq = 0;
+    bool first_packet = true;
+    
+    // Statistics
+    uint64_t total_packets = 0;
+    uint64_t packet_loss_count = 0;
+    uint64_t fec_recovered_packets = 0;
   };
 
   extern std::unique_ptr<mic_write_wasapi_t> mic_redirect_device;

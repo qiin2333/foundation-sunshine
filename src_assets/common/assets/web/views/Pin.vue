@@ -59,15 +59,15 @@
             <div class="alert alert-danger" v-if="unpairAllStatus === false">
               {{ $t('troubleshooting.unpair_all_error') }}
             </div>
-            <p class="mb-3 text-muted">Remove your paired devices.</p>
+            <p class="mb-3 text-muted">{{ $t('pin.remove_paired_devices_desc') }}</p>
           </div>
 
           <!-- 加载状态 -->
           <div v-if="loading && clients.length === 0" class="text-center py-5">
             <div class="spinner-border text-primary" role="status">
-              <span class="visually-hidden">Loading...</span>
+              <span class="visually-hidden">{{ $t('pin.loading') }}</span>
             </div>
-            <p class="mt-3 text-muted">Loading clients...</p>
+            <p class="mt-3 text-muted">{{ $t('pin.loading_clients') }}</p>
           </div>
 
           <!-- 客户端列表 -->
@@ -76,10 +76,28 @@
               <table class="table table-hover table-bordered align-middle mb-0">
                 <thead class="table-dark">
                   <tr>
-                    <th scope="col" width="20%" class="ps-3">Name</th>
-                    <th scope="col" class="ps-3">HDR Profile</th>
-                    <th scope="col" class="ps-3">尺寸</th>
-                    <th scope="col" width="30%" class="text-center">Actions</th>
+                    <th scope="col" width="20%" class="ps-3">{{ $t('pin.client_name') }}</th>
+                    <th scope="col" class="ps-3">
+                      <span class="d-inline-flex align-items-center gap-1">
+                        {{ $t('pin.hdr_profile') }}
+                        <i
+                          class="fas fa-info-circle text-info"
+                          data-tooltip="hdr-profile"
+                          style="cursor: help; font-size: 0.875rem;"
+                        ></i>
+                      </span>
+                    </th>
+                    <th scope="col" class="ps-3">
+                      <span class="d-inline-flex align-items-center gap-1">
+                        {{ $t('pin.device_size') }}
+                        <i
+                          class="fas fa-info-circle text-info"
+                          data-tooltip="device-size"
+                          style="cursor: help; font-size: 0.875rem;"
+                        ></i>
+                      </span>
+                    </th>
+                    <th scope="col" width="30%" class="text-center">{{ $t('pin.actions') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -88,7 +106,7 @@
                     :key="client.uuid"
                     :class="{ 'table-warning': editingStates[client.uuid] }"
                   >
-                    <td class="fw-medium ps-3">{{ client.name || 'Unknown Client' }}</td>
+                    <td class="fw-medium ps-3">{{ client.name || $t('pin.unknown_client') }}</td>
                     <td class="ps-3">
                       <select
                         class="form-select form-select-sm"
@@ -96,8 +114,8 @@
                         :disabled="!editingStates[client.uuid]"
                         @change="onProfileChange(client.uuid)"
                       >
-                        <option v-if="!hasIccFileList" value="" disabled>Please modify in GUI</option>
-                        <option v-else value="">-- None --</option>
+                        <option v-if="!hasIccFileList" value="" disabled>{{ $t('pin.modify_in_gui') }}</option>
+                        <option v-else value="">{{ $t('pin.none') }}</option>
                         <option v-for="item in hdrProfileList" :value="item" :key="item">{{ item }}</option>
                       </select>
                     </td>
@@ -108,9 +126,9 @@
                         :disabled="!editingStates[client.uuid]"
                         @change="onSizeChange(client.uuid)"
                       >
-                        <option value="small">小 - 手机</option>
-                        <option value="medium">中 - 平板</option>
-                        <option value="large">大 - TV</option>
+                        <option value="small">{{ $t('pin.device_size_small') }}</option>
+                        <option value="medium">{{ $t('pin.device_size_medium') }}</option>
+                        <option value="large">{{ $t('pin.device_size_large') }}</option>
                       </select>
                     </td>
                     <td class="text-center">
@@ -121,9 +139,9 @@
                             class="btn btn-sm btn-outline-primary me-1"
                             @click="startEdit(client.uuid)"
                             :disabled="saving || deleting.has(client.uuid)"
-                            title="Edit client settings"
+                            :title="$t('pin.edit_client_settings')"
                           >
-                            <i class="fas fa-edit me-1"></i> Edit
+                            <i class="fas fa-edit me-1"></i> {{ $t('_common.edit') }}
                           </button>
                         </template>
                         <!-- 保存/取消按钮 -->
@@ -132,18 +150,18 @@
                             class="btn btn-sm btn-success me-1"
                             @click="handleSave(client.uuid)"
                             :disabled="saving || deleting.has(client.uuid)"
-                            title="Save changes"
+                            :title="$t('pin.save_changes')"
                           >
                             <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
-                            <i v-else class="fas fa-check me-1"></i> Save
+                            <i v-else class="fas fa-check me-1"></i> {{ $t('_common.save') }}
                           </button>
                           <button
                             class="btn btn-sm btn-secondary me-1"
                             @click="handleCancelEdit(client.uuid)"
                             :disabled="saving || deleting.has(client.uuid)"
-                            title="Cancel editing"
+                            :title="$t('pin.cancel_editing')"
                           >
-                            <i class="fas fa-times me-1"></i> Cancel
+                            <i class="fas fa-times me-1"></i> {{ $t('_common.cancel') }}
                           </button>
                         </template>
                         <!-- 删除按钮 -->
@@ -151,10 +169,10 @@
                           class="btn btn-sm btn-outline-danger"
                           @click="handleDelete(client)"
                           :disabled="saving || deleting.has(client.uuid) || editingStates[client.uuid]"
-                          :title="editingStates[client.uuid] ? 'Please save or cancel editing first' : 'Delete client'"
+                          :title="editingStates[client.uuid] ? $t('pin.save_or_cancel_first') : $t('pin.delete_client')"
                         >
                           <span v-if="deleting.has(client.uuid)" class="spinner-border spinner-border-sm me-1"></span>
-                          <i v-else class="fas fa-trash me-1"></i> Delete
+                          <i v-else class="fas fa-trash me-1"></i> {{ $t('_common.delete') }}
                         </button>
                       </div>
                       <!-- 未保存更改提示 -->
@@ -162,7 +180,7 @@
                         v-if="editingStates[client.uuid] && hasUnsavedChanges(client.uuid)"
                         class="text-warning small mt-2"
                       >
-                        <i class="fas fa-exclamation-triangle me-1"></i> Unsaved changes
+                        <i class="fas fa-exclamation-triangle me-1"></i> {{ $t('pin.unsaved_changes') }}
                       </div>
                     </td>
                   </tr>
@@ -183,44 +201,41 @@
       </div>
 
       <!-- 删除确认对话框 -->
-      <div
-        v-if="clientToDelete"
-        class="modal fade show d-block"
-        tabindex="-1"
-        style="background-color: rgba(0, 0, 0, 0.5)"
-        @click.self="clientToDelete = null"
-      >
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title">Confirm Delete</h5>
-              <button type="button" class="btn-close" @click="clientToDelete = null"></button>
+      <Transition name="fade">
+        <div v-if="clientToDelete" class="delete-client-overlay" @click.self="clientToDelete = null">
+          <div class="delete-client-modal">
+            <div class="delete-client-header">
+              <h5>
+                <i class="fas fa-exclamation-triangle me-2"></i>{{ $t('pin.confirm_delete') }}
+              </h5>
+              <button class="btn-close" @click="clientToDelete = null"></button>
             </div>
-            <div class="modal-body">
-              <p>
-                Are you sure you want to delete <strong>{{ clientToDelete.name || 'Unknown Client' }}</strong
-                >?
-              </p>
-              <p class="text-muted small mb-0">This action cannot be undone.</p>
+            <div class="delete-client-body">
+              <p v-html="$t('pin.delete_confirm_message', { name: clientToDelete.name || $t('pin.unknown_client') })"></p>
+              <p class="text-muted small mb-0">{{ $t('pin.delete_warning') }}</p>
             </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="clientToDelete = null">Cancel</button>
+            <div class="delete-client-footer">
+              <button type="button" class="btn btn-secondary" @click="clientToDelete = null">{{ $t('_common.cancel') }}</button>
               <button type="button" class="btn btn-danger" @click="confirmDelete">
                 <span v-if="deleting.has(clientToDelete.uuid)" class="spinner-border spinner-border-sm me-2"></span>
-                Delete
+                {{ $t('_common.delete') }}
               </button>
             </div>
           </div>
         </div>
-      </div>
+      </Transition>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, nextTick, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { Tooltip } from 'bootstrap'
 import Navbar from '../components/layout/Navbar.vue'
 import { usePin } from '../composables/usePin.js'
+
+const { t } = useI18n()
 
 const {
   pairingDeviceName,
@@ -248,105 +263,221 @@ const {
 
 const clientToDelete = ref(null)
 
-// 处理删除
 const handleDelete = (client) => {
-  // 如果正在编辑，不允许删除
-  if (editingStates[client.uuid]) {
-    return
-  }
+  if (editingStates[client.uuid]) return
   clientToDelete.value = client
 }
 
-// 确认删除
 const confirmDelete = async () => {
   if (!clientToDelete.value) return
-  const uuid = clientToDelete.value.uuid
-  const success = await unpairSingle(uuid)
-  if (success) {
-    clientToDelete.value = null
-  }
+  const success = await unpairSingle(clientToDelete.value.uuid)
+  if (success) clientToDelete.value = null
 }
 
-// 处理保存
 const handleSave = async (uuid) => {
   const success = await saveClient(uuid)
-  if (!success) {
-    alert('Failed to save client settings. Please try again.')
-  }
+  if (!success) alert(t('pin.save_failed'))
 }
 
-// 处理取消编辑
-const handleCancelEdit = (uuid) => {
-  cancelEdit(uuid)
-}
+const handleCancelEdit = (uuid) => cancelEdit(uuid)
 
-// 处理HDR Profile变更
-const onProfileChange = (uuid) => {
-  // 可以在这里添加实时验证或其他逻辑
-}
-
-// 处理尺寸变更
-const onSizeChange = (uuid) => {
-  // 可以在这里添加实时验证或其他逻辑
-}
-
-// 处理取消所有配对
 const handleUnpairAll = async () => {
-  if (confirm('Are you sure you want to unpair all clients? This action cannot be undone.')) {
-    await unpairAll()
-  }
+  if (confirm(t('pin.unpair_all_confirm'))) await unpairAll()
+}
+
+const initTooltips = () => {
+  nextTick(() => {
+    const tooltipConfigs = [
+      { selector: '[data-tooltip="hdr-profile"]', title: t('pin.hdr_profile_info') },
+      { selector: '[data-tooltip="device-size"]', title: t('pin.device_size_info') }
+    ]
+    
+    tooltipConfigs.forEach(({ selector, title }) => {
+      const el = document.querySelector(selector)
+      if (!el) return
+      
+      Tooltip.getInstance(el)?.dispose()
+      new Tooltip(el, { html: true, placement: 'top', title })
+    })
+  })
 }
 
 onMounted(async () => {
   await loadConfig()
   await refreshClients()
 
-  initPinForm(() => {
-    setTimeout(() => refreshClients(), 0)
-  })
+  initPinForm(() => setTimeout(refreshClients, 0))
 
-  // 获取 HDR Profile 列表（如果 Electron 可用）
   if (window.electron?.getIccFileList) {
     hasIccFileList.value = true
     window.electron.getIccFileList((files = []) => {
-      hdrProfileList.value = files.filter((file) => /.icc$/.test(file))
+      hdrProfileList.value = files.filter(file => /.icc$/.test(file))
     })
   } else {
     hasIccFileList.value = false
   }
+
+  initTooltips()
 })
+
+watch(clients, initTooltips, { deep: true })
 </script>
 
 <style>
-@import '../styles/global.css';
+@import '../styles/global.less';
 </style>
 
-<style scoped>
+<style scoped lang="less">
 .client-list-container {
   margin-top: 1rem;
+
+  .table-responsive {
+    border-radius: var(--border-radius-md, 8px);
+    overflow: hidden;
+  }
+
+  .table {
+    border-radius: var(--border-radius-md, 12px);
+    overflow: hidden;
+    margin-bottom: 0;
+  }
 }
 
 .table-warning {
   background-color: rgba(255, 193, 7, 0.1) !important;
 }
 
-.modal.show {
-  display: block;
+/* Delete Client Modal - 使用 ScanResultModal 样式 */
+.delete-client-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  background: var(--overlay-bg, rgba(0, 0, 0, 0.7));
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-lg, 20px);
+  overflow: hidden;
+
+  [data-bs-theme='light'] & {
+    background: rgba(0, 0, 0, 0.5);
+  }
 }
 
-.modal.show .modal-dialog {
-  margin-top: 15vh;
+.delete-client-modal {
+  background: var(--modal-bg, rgba(30, 30, 50, 0.95));
+  border: 1px solid var(--border-color-light, rgba(255, 255, 255, 0.2));
+  border-radius: var(--border-radius-xl, 12px);
+  width: 100%;
+  max-width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-xl, 0 25px 50px rgba(0, 0, 0, 0.5));
+  animation: modalSlideUp 0.3s ease;
+
+  [data-bs-theme='light'] & {
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.2);
+  }
+}
+
+@keyframes modalSlideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.delete-client-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md, 20px) var(--spacing-lg, 24px);
+  border-bottom: 1px solid var(--border-color-light, rgba(255, 255, 255, 0.1));
+
+  h5 {
+    margin: 0;
+    color: var(--text-primary, #fff);
+    font-size: var(--font-size-lg, 1.1rem);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+  }
+
+  [data-bs-theme='light'] & {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+
+    h5 {
+      color: #000000;
+    }
+  }
+}
+
+.delete-client-body {
+  padding: var(--spacing-lg, 24px);
+  font-size: var(--font-size-md, 0.95rem);
+  line-height: 1.5;
+  overflow-y: auto;
+  flex: 1;
+  color: var(--text-primary, #fff);
+
+  [data-bs-theme='light'] & {
+    color: #000000;
+  }
+}
+
+.delete-client-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: var(--spacing-md, 20px) var(--spacing-lg, 24px);
+  border-top: 1px solid var(--border-color-light, rgba(255, 255, 255, 0.1));
+
+  [data-bs-theme='light'] & {
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+  }
+
+  button {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+  }
+}
+
+/* Vue 过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* 响应式优化 */
 @media (max-width: 768px) {
   .btn-toolbar {
     flex-direction: column;
-  }
 
-  .btn-toolbar .btn {
-    width: 100%;
-    margin-bottom: 0.25rem;
+    .btn {
+      width: 100%;
+      margin-bottom: 0.25rem;
+    }
   }
 
   .table-responsive {

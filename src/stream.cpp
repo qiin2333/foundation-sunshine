@@ -5,6 +5,7 @@
 #include "process.h"
 
 #include <future>
+#include <iomanip>
 #include <queue>
 #include <unordered_map>
 
@@ -23,6 +24,7 @@ extern "C" {
 #include "config.h"
 #include "display_device/session.h"
 #include "globals.h"
+#include "rtsp.h"
 #include "input.h"
 #include "logging.h"
 #include "network.h"
@@ -51,7 +53,8 @@ extern "C" {
 #define IDX_SET_ADAPTIVE_TRIGGERS 15
 #define IDX_MIC_DATA 16
 #define IDX_MIC_CONFIG 17
-#define IDX_DYNAMIC_BITRATE_CHANGE 18  // 新增：动态码率调整消息类型
+#define IDX_DYNAMIC_PARAM_CHANGE 18  // 统一动态参数调整消息类型（支持码率、分辨率等）
+#define IDX_RESOLUTION_CHANGE 19  // 分辨率变化通知
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -72,7 +75,8 @@ static const short packetTypes[] = {
   0x5503,  // Set Adaptive triggers (Sunshine protocol extension)
   0x5504,  // Microphone data (Sunshine protocol extension)
   0x5505,  // Microphone config (Sunshine protocol extension)
-  0x5506,  // Dynamic bitrate change (Sunshine protocol extension)
+  0x5506,  // Dynamic parameter change (Sunshine protocol extension) - 统一动态参数调整
+  0x5507,  // Resolution change (Sunshine protocol extension) - 分辨率变化通知
 };
 
 namespace asio = boost::asio;
@@ -221,6 +225,13 @@ namespace stream {
     SS_HDR_METADATA metadata;
   };
 
+  struct control_resolution_change_t {
+    control_header_v2 header;
+
+    std::uint32_t width;
+    std::uint32_t height;
+  };
+
   typedef struct control_encrypted_t {
     std::uint16_t encryptedHeaderType;  // Always LE 0x0001
     std::uint16_t length;  // sizeof(seq) + 16 byte tag + secondary header and data
@@ -239,9 +250,6 @@ namespace stream {
     RTP_PACKET rtp;
     AUDIO_FEC_HEADER fecHeader;
   };
-
-  // 麦克风数据包类型
-  constexpr std::uint8_t MIC_PACKET_TYPE_OPUS = 0x61;  // 'a'
 
   struct mic_packet_t {
     RTP_PACKET rtp;
@@ -365,7 +373,7 @@ namespace stream {
     std::thread video_thread;
     std::thread audio_thread;
     std::thread control_thread;
-    std::thread mic_thread;  // 新增麦克风接收线程
+    std::thread mic_thread;
 
     asio::io_context io_context;
 
@@ -377,6 +385,17 @@ namespace stream {
 
     std::atomic<bool> mic_socket_enabled { false };
     std::atomic<int> mic_sessions_count { 0 };  // 需要麦克风的会话数
+
+    std::atomic<bool> mic_encryption_enabled { false };
+    std::optional<crypto::cipher::cbc_t> mic_cipher;
+    crypto::aes_t mic_iv;
+    std::mutex mic_cipher_mutex;
+
+    // TODO: 未来版本应当强制启用麦克风加密，防止被窃听
+    std::atomic<bool> mic_reject_plaintext { false };
+
+    std::map<std::string, std::string> client_ip_to_name;
+    std::mutex client_name_mutex;
   };
 
   struct session_t {
@@ -447,9 +466,17 @@ namespace stream {
 
       platf::feedback_queue_t feedback_queue;
       safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;
+      safe::mail_raw_t::event_t<std::pair<std::uint32_t, std::uint32_t>> resolution_change_queue;  // width, height
     } control;
 
     std::uint32_t launch_session_id;
+
+    // 保存 launch_session 的关键字段，用于动态参数更新
+    bool enable_sops { false };
+    bool enable_hdr { false };
+    float max_nits { 1000.0f };
+    float min_nits { 0.001f };
+    float max_full_nits { 1000.0f };
 
     safe::mail_raw_t::event_t<bool> shutdown_event;
     safe::signal_t controlEnd;
@@ -459,6 +486,9 @@ namespace stream {
     // Current total bitrate for this session (including FEC overhead) in Kbps
     // This is the user-configured bitrate, not the encoding bitrate
     std::atomic<int> current_total_bitrate { 0 };
+
+    // 标识这是仅控制流会话（只作为输入设备，不传输视频/音频）
+    bool control_only { false };
   };
 
   /**
@@ -988,6 +1018,37 @@ namespace stream {
     return 0;
   }
 
+  int
+  send_resolution_change(session_t *session, std::uint32_t width, std::uint32_t height) {
+    if (!session->control.peer) {
+      BOOST_LOG(warning) << "Couldn't send resolution change, still waiting for PING from Moonlight"sv;
+      // Still waiting for PING from Moonlight
+      return -1;
+    }
+
+    control_resolution_change_t plaintext {};
+    plaintext.header.type = packetTypes[IDX_RESOLUTION_CHANGE];
+    plaintext.header.payloadLength = sizeof(control_resolution_change_t) - sizeof(control_header_v2);
+
+    plaintext.width = util::endian::little(width);
+    plaintext.height = util::endian::little(height);
+
+    std::array<std::uint8_t,
+      sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(sizeof(plaintext)) + crypto::cipher::tag_size>
+      encrypted_payload;
+
+    auto payload = encode_control(session, util::view(plaintext), encrypted_payload);
+    if (session->broadcast_ref->control_server.send(payload, session->control.peer)) {
+      TUPLE_2D(port, addr, platf::from_sockaddr_ex((sockaddr *) &session->control.peer->address.address));
+      BOOST_LOG(warning) << "Couldn't send resolution change to ["sv << addr << ':' << port << ']';
+
+      return -1;
+    }
+
+    BOOST_LOG(debug) << "Sent resolution change: " << width << "x" << height;
+    return 0;
+  }
+
   void
   controlBroadcastThread(control_server_t *server) {
     server->map(packetTypes[IDX_PERIODIC_PING], [](session_t *session, const std::string_view &payload) {
@@ -1024,27 +1085,206 @@ namespace stream {
       session->video.idr_events->raise(true);
     });
 
-    server->map(packetTypes[IDX_DYNAMIC_BITRATE_CHANGE], [&](session_t *session, const std::string_view &payload) {
-      BOOST_LOG(debug) << "type [IDX_DYNAMIC_BITRATE_CHANGE]"sv;
+    // 辅助函数：处理分辨率变更
+    auto handle_resolution_change = [](session_t *session, int new_width, int new_height) {
+      int old_width = session->config.monitor.width;
+      int old_height = session->config.monitor.height;
+      
+      BOOST_LOG(info) << "Dynamic resolution change requested: " << old_width << "x" << old_height 
+                      << " -> " << new_width << "x" << new_height;
 
-      if (payload.size() >= sizeof(int)) {
-        auto new_bitrate = *(int *) payload.data();
-        BOOST_LOG(info) << "Dynamic bitrate change requested: " << new_bitrate << " Kbps";
+      // 验证分辨率范围
+      constexpr int MAX_RESOLUTION = 16384;
+      if (new_width <= 0 || new_width > MAX_RESOLUTION || new_height <= 0 || new_height > MAX_RESOLUTION) {
+        BOOST_LOG(warning) << "Invalid resolution value: " << new_width << "x" << new_height;
+        return;
+      }
 
-        // 验证码率范围
-        if (new_bitrate > 0 && new_bitrate <= 800000) {  // 最大800Mbps
-          video::dynamic_param_t param;
-          param.type = video::dynamic_param_type_e::BITRATE;
-          param.value.int_value = new_bitrate;
-          param.valid = true;
-          session->video.dynamic_param_change_events->raise(param);
-        }
-        else {
-          BOOST_LOG(warning) << "Invalid bitrate value: " << new_bitrate << " Kbps";
-        }
+      // 检查分辨率是否真的改变了
+      if (old_width == new_width && old_height == new_height) {
+        BOOST_LOG(debug) << "Resolution unchanged, ignoring request";
+        return;
+      }
+
+      // 检测是否是旋转导致的宽高互换（例如：1920x1080 -> 1080x1920）
+      bool is_rotation = (old_width == new_height && old_height == new_width);
+      if (is_rotation) {
+        BOOST_LOG(info) << "Detected display rotation: width and height swapped";
+      }
+
+      // 更新会话配置
+      session->config.monitor.width = new_width;
+      session->config.monitor.height = new_height;
+
+      // 创建临时的 launch_session_t 来更新显示设备配置
+      // 注意：必须按照结构体声明顺序初始化字段
+      rtsp_stream::launch_session_t temp_launch_session {};
+      temp_launch_session.id = session->launch_session_id;
+      temp_launch_session.client_name = session->client_name;
+      temp_launch_session.width = new_width;
+      temp_launch_session.height = new_height;
+      temp_launch_session.fps = session->config.monitor.framerate;
+      temp_launch_session.enable_hdr = session->enable_hdr;
+      temp_launch_session.enable_sops = session->enable_sops;
+      temp_launch_session.max_nits = session->max_nits;
+      temp_launch_session.min_nits = session->min_nits;
+      temp_launch_session.max_full_nits = session->max_full_nits;
+
+      // 更新显示设备配置（重新配置模式）
+      // 注意：这也会触发捕获端和编码器的重新初始化，以适配新的分辨率
+      if (is_rotation) {
+        BOOST_LOG(info) << "Reconfiguring display device for rotation: " << old_width << "x" << old_height 
+                        << " -> " << new_width << "x" << new_height;
       }
       else {
-        BOOST_LOG(warning) << "Invalid payload size for dynamic bitrate change";
+        BOOST_LOG(info) << "Reconfiguring display device for new resolution: " << old_width << "x" << old_height 
+                        << " -> " << new_width << "x" << new_height;
+      }
+      
+      display_device::session_t::get().configure_display(config::video, temp_launch_session, true);
+
+      // 请求 IDR 帧以确保客户端能正确显示新分辨率
+      // 这对于旋转场景特别重要，因为宽高互换需要新的关键帧
+      session->video.idr_events->raise(true);
+
+      // 注意：编码器和触摸端口的更新会在捕获端重新初始化时自动处理
+      // - 编码器会在重新初始化时使用新的宽高（通过 config.monitor.width/height）
+      // - 触摸端口会在视频捕获循环中通过 make_port() 自动更新
+      BOOST_LOG(info) << "Resolution change completed: " << new_width << "x" << new_height 
+                      << (is_rotation ? " (rotation detected)" : "");
+    };
+
+    // 统一动态参数更新协议 (IDX_DYNAMIC_PARAM_CHANGE)
+    // Payload 格式：
+    // - 参数类型 (int, 4字节): 0=分辨率, 1=FPS, 2=码率, 3=QP, 4=FEC, 5=预设, 6=自适应量化, 7=多遍编码, 8=VBV缓冲区
+    // - 参数值：
+    //   * 分辨率 (类型0): 2个int (8字节, width和height)
+    //   * FPS (类型1): 1个float (4字节)
+    //   * 其他单值参数（码率、QP等）: 1个int (4字节)
+    server->map(packetTypes[IDX_DYNAMIC_PARAM_CHANGE], [&, handle_resolution_change](session_t *session, const std::string_view &payload) {
+      BOOST_LOG(debug) << "type [IDX_DYNAMIC_PARAM_CHANGE]"sv;
+
+      constexpr size_t MIN_PAYLOAD_SIZE = sizeof(int);
+      if (payload.size() < MIN_PAYLOAD_SIZE) {
+        BOOST_LOG(warning) << "Invalid payload size for dynamic param change. Expected at least " 
+                           << MIN_PAYLOAD_SIZE << " bytes, got " << payload.size();
+        return;
+      }
+
+      const int param_type = *reinterpret_cast<const int *>(payload.data());
+      
+      if (param_type < 0 || param_type >= static_cast<int>(video::dynamic_param_type_e::MAX_PARAM_TYPE)) {
+        BOOST_LOG(warning) << "Invalid parameter type: " << param_type;
+        return;
+      }
+
+      const auto param_type_enum = static_cast<video::dynamic_param_type_e>(param_type);
+      
+      // 处理分辨率变更（需要两个int值）
+      if (param_type_enum == video::dynamic_param_type_e::RESOLUTION) {
+        constexpr size_t RESOLUTION_PAYLOAD_SIZE = sizeof(int) * 3;  // 类型 + width + height
+        if (payload.size() < RESOLUTION_PAYLOAD_SIZE) {
+          BOOST_LOG(warning) << "Invalid payload size for resolution change. Expected " 
+                             << RESOLUTION_PAYLOAD_SIZE << " bytes, got " << payload.size();
+          return;
+        }
+
+        const auto *resolution_data = reinterpret_cast<const int *>(payload.data());
+        handle_resolution_change(session, resolution_data[1], resolution_data[2]);
+        return;
+      }
+
+      // 处理FPS变更（需要float值）
+      if (param_type_enum == video::dynamic_param_type_e::FPS) {
+        constexpr size_t FPS_PAYLOAD_SIZE = sizeof(int) + sizeof(float);
+        if (payload.size() < FPS_PAYLOAD_SIZE) {
+          BOOST_LOG(warning) << "Invalid payload size for FPS change. Expected " 
+                             << FPS_PAYLOAD_SIZE << " bytes, got " << payload.size();
+          return;
+        }
+
+        const float new_fps = *reinterpret_cast<const float *>(payload.data() + sizeof(int));
+        
+        if (new_fps <= 0.0f || new_fps > 1000.0f) {
+          BOOST_LOG(warning) << "Invalid FPS value: " << new_fps;
+          return;
+        }
+
+        session->config.monitor.framerate = static_cast<int>(new_fps);
+        
+        video::dynamic_param_t param;
+        param.type = video::dynamic_param_type_e::FPS;
+        param.value.float_value = new_fps;
+        param.valid = true;
+        session->video.dynamic_param_change_events->raise(param);
+        
+        BOOST_LOG(info) << "Dynamic FPS change: " << new_fps << " fps";
+        return;
+      }
+
+      // 处理其他单值参数（码率、QP等，使用int值）
+      constexpr size_t INT_PARAM_PAYLOAD_SIZE = sizeof(int) * 2;
+      if (payload.size() < INT_PARAM_PAYLOAD_SIZE) {
+        BOOST_LOG(warning) << "Invalid payload size for dynamic param change. Expected at least " 
+                           << INT_PARAM_PAYLOAD_SIZE << " bytes, got " << payload.size();
+        return;
+      }
+
+      const int param_value = reinterpret_cast<const int *>(payload.data())[1];
+
+      video::dynamic_param_t param;
+      param.type = param_type_enum;
+      param.valid = true;
+
+      // 参数验证和处理的辅助lambda
+      auto validate_and_raise = [&](bool valid, auto value, const char *name, const char *unit = "") {
+        if (valid) {
+          if constexpr (std::is_same_v<decltype(value), bool>) {
+            param.value.bool_value = value;
+          } else {
+            param.value.int_value = value;
+          }
+          session->video.dynamic_param_change_events->raise(param);
+          BOOST_LOG(info) << "Dynamic " << name << " change: " << value << unit;
+          return true;
+        }
+        BOOST_LOG(warning) << "Invalid " << name << " value: " << param_value;
+        return false;
+      };
+
+      switch (param_type_enum) {
+        case video::dynamic_param_type_e::BITRATE:
+          if (validate_and_raise(param_value > 0 && param_value <= 800000, param_value, "bitrate", " Kbps")) {
+            session->current_total_bitrate = param_value;
+          }
+          break;
+        case video::dynamic_param_type_e::QP:
+          validate_and_raise(param_value >= 0 && param_value <= 51, param_value, "QP");
+          break;
+        case video::dynamic_param_type_e::FEC_PERCENTAGE:
+          validate_and_raise(param_value >= 0 && param_value <= 100, param_value, "FEC percentage", "%");
+          break;
+        case video::dynamic_param_type_e::ADAPTIVE_QUANTIZATION: {
+          bool enabled = (param_value != 0);
+          param.value.bool_value = enabled;
+          session->video.dynamic_param_change_events->raise(param);
+          BOOST_LOG(info) << "Dynamic adaptive quantization change: " << (enabled ? "enabled" : "disabled");
+          break;
+        }
+        case video::dynamic_param_type_e::MULTI_PASS:
+          validate_and_raise(param_value >= 0 && param_value <= 2, param_value, "multi-pass");
+          break;
+        case video::dynamic_param_type_e::VBV_BUFFER_SIZE:
+          validate_and_raise(param_value > 0, param_value, "VBV buffer size", " Kbps");
+          break;
+        case video::dynamic_param_type_e::PRESET:
+          param.value.int_value = param_value;
+          session->video.dynamic_param_change_events->raise(param);
+          BOOST_LOG(info) << "Dynamic preset change: " << param_value;
+          break;
+        default:
+          BOOST_LOG(warning) << "Unsupported parameter type: " << param_type;
+          break;
       }
     });
 
@@ -1221,6 +1461,15 @@ namespace stream {
 
               send_hdr_mode(session, std::move(hdr_info));
             }
+
+            auto &resolution_change_queue = session->control.resolution_change_queue;
+            while (session->control.peer && resolution_change_queue->peek()) {
+              auto resolution = resolution_change_queue->pop();
+              
+              if (resolution) {
+                send_resolution_change(session, resolution->first, resolution->second);
+              }
+            }
           }
 
           ++pos;
@@ -1276,32 +1525,121 @@ namespace stream {
     auto &io = ctx.io_context;
 
     udp::endpoint peer;
-    std::array<char, 2048> buffer;
+    std::array<char, 2048> mic_recv_buffer;
     bool mic_device_initialized = false;
 
-    auto process_audio_data = [&](const uint8_t *audio_data, size_t data_size) {
+    // 麦克风统计结构体（按客户端地址分组）
+    struct MicStats {
+      uint64_t total_packets = 0;
+      uint64_t decrypt_success = 0;
+      uint64_t decrypt_failed = 0;
+      uint64_t invalid_data = 0;
+    };
+    std::map<std::string, MicStats> client_stats;
+
+    // // SSRC验证辅助函数
+    // auto validate_mic_ssrc = [](uint32_t ssrc, const std::string &client_id) -> bool {
+    //   if (ssrc != MIC_PACKET_MAGIC) {
+    //     BOOST_LOG(warning) << "Client " << client_id << " received invalid microphone packet type (SSRC: 0x" 
+    //                       << std::hex << ssrc << std::dec << ")";
+    //     return false;
+    //   }
+    //   return true;
+    // };
+
+    auto process_audio_data = [&](const uint8_t *audio_data, size_t data_size, uint16_t sequence_number, const std::string &peer_addr) {
       if (!ctx.mic_socket_enabled.load()) {
         return;
       }
 
-      if (int result = audio::write_mic_data(audio_data, data_size); result < 0) {
-        BOOST_LOG(debug) << "Failed to write microphone data (audio context may not be active)";
+      // 根据 RTSP 协商的配置判断是否启用加密
+      // 不依赖数据长度猜测，直接使用会话配置作为权威来源
+      bool is_encrypted = ctx.mic_encryption_enabled.load();
+
+      // 更新统计
+      auto &stats = client_stats[peer_addr];
+      stats.total_packets++;
+
+      if (is_encrypted && ctx.mic_cipher.has_value()) {
+        std::lock_guard<std::mutex> lg(ctx.mic_cipher_mutex);
+        // 根据 sequenceNumber 更新 IV
+        // 客户端使用: baseIv[0:4] (Big Endian) + (sequenceNumber - 1) & 0xFFFF
+        // 这与音频加密不同，音频加密使用: avRiKeyId + sequenceNumber
+        // ctx.mic_iv 的前 4 字节存储的是 baseIv（大端序），对应客户端的 remoteInputAesIv
+        crypto::aes_t current_iv(16);  // 确保是 16 字节
+        uint32_t baseIvVal = util::endian::big<std::uint32_t>(*(std::uint32_t *) ctx.mic_iv.data());
+        // 服务端收到的 sequence_number 就是包里的实际值，直接使用即可（不需要减1），客户端减1是因为它的 sequenceNumber 变量在写入包后就递增了
+        uint32_t ivSeq = baseIvVal + (sequence_number & 0xFFFF);
+        *(std::uint32_t *) current_iv.data() = util::endian::big<std::uint32_t>(ivSeq);
+        // 确保后 12 字节为 0（客户端构建 IV 时后 12 字节也是 0）
+        std::memset(current_iv.data() + 4, 0, 12);
+        std::vector<std::uint8_t> plaintext;
+        std::string_view cipher_view((const char *) audio_data, data_size);
+        if (ctx.mic_cipher->decrypt(cipher_view, plaintext, &current_iv) != 0) {
+          // 解密失败：可能是网络损坏包、IV不匹配、或密钥错误
+          stats.decrypt_failed++;
+          return;  // 丢弃数据包
+        }
+        
+        stats.decrypt_success++;
+        
+        if (plaintext.size() > 0) {
+          // 简单的有效性检查：Opus 数据不应该全是 0 或全是 0xFF
+          bool looks_valid = true;
+          if (plaintext.size() >= 4) {
+            uint8_t first_byte = plaintext[0];
+            uint8_t second_byte = plaintext[1];
+            uint8_t third_byte = plaintext[2];
+            uint8_t fourth_byte = plaintext[3];
+            bool all_zero = (first_byte == 0 && second_byte == 0 && third_byte == 0 && fourth_byte == 0);
+            bool all_ff = (first_byte == 0xFF && second_byte == 0xFF && third_byte == 0xFF && fourth_byte == 0xFF);
+            if (all_zero || all_ff) {
+              looks_valid = false;
+              stats.invalid_data++;
+            }
+          }
+          // 注意：如果 plaintext.size() < 4，无法验证，假设有效并继续处理
+
+          if (!looks_valid) {
+            return;  // 丢弃数据包
+          }
+        }
+
+        // 解密成功且数据看起来有效
+        audio::write_mic_data(plaintext.data(), plaintext.size(), sequence_number);
+        return;
       }
+
+      // 安全模式：拒绝明文数据
+      if (ctx.mic_reject_plaintext.load()) {
+        BOOST_LOG(warning) << "Rejected plaintext microphone data (mic_reject_plaintext enabled)";
+        stats.decrypt_failed++;
+        return;
+      }
+
+      // 未加密数据或加密未启用，直接处理
+      // 也要统计未加密数据
+      stats.decrypt_success++;  // 明文数据算作"成功"
+      audio::write_mic_data(audio_data, data_size, sequence_number);
     };
 
     std::function<void(const boost::system::error_code, size_t)> mic_recv_func;
-    mic_recv_func = [&](const boost::system::error_code &ec, size_t bytes) {
+    mic_recv_func = [&](const boost::system::error_code &ec, size_t received_bytes) {
       if (!ctx.mic_socket_enabled.load()) {
         return;
       }
 
       auto fg = util::fail_guard([&]() {
         if (ctx.mic_socket_enabled.load()) {
-          ctx.mic_sock.async_receive_from(asio::buffer(buffer), peer, 0, mic_recv_func);
+          ctx.mic_sock.async_receive_from(asio::buffer(mic_recv_buffer), peer, 0, mic_recv_func);
         }
       });
 
       if (ec) {
+        if (ec == boost::asio::error::operation_aborted) {
+          BOOST_LOG(info) << "Mic socket normally closed";
+          return;
+        }
         if (ec != boost::system::errc::connection_refused &&
             ec != boost::system::errc::connection_reset) {
           BOOST_LOG(error) << "Mic socket error: "sv << ec.message();
@@ -1309,36 +1647,71 @@ namespace stream {
         return;
       }
 
-      if (bytes < sizeof(RTP_PACKET)) {
+      if (received_bytes < sizeof(RTP_PACKET)) {
         return;
       }
 
+      // 获取客户端标识：设备名拼接IP地址
+      std::string client_ip = peer.address().to_string();
+      std::string client_id;
+      {
+        std::lock_guard<std::mutex> lg(ctx.client_name_mutex);
+        auto it = ctx.client_ip_to_name.find(client_ip);
+        if (it != ctx.client_ip_to_name.end()) {
+          client_id = it->second + "@" + client_ip;  // 设备名@IP
+        } else {
+          client_id = "@" + client_ip;  // 回退到IP（未知设备名时）
+        }
+      }
+
       // 尝试16位扩展包类型
-      if (bytes >= sizeof(rtp_packet_ext_t)) {
-        auto *header_ext = (rtp_packet_ext_t *) buffer.data();
+      if (received_bytes >= sizeof(rtp_packet_ext_t)) {
+        auto *header_ext = (rtp_packet_ext_t *) mic_recv_buffer.data();
         if (header_ext->packetType == packetTypes[IDX_MIC_DATA]) {
           size_t header_size = sizeof(rtp_packet_ext_t);
-          if (bytes > header_size) {
-            process_audio_data(reinterpret_cast<const uint8_t *>(buffer.data()) + header_size, bytes - header_size);
+          if (received_bytes > header_size) {
+            uint16_t sequence_number = util::endian::little(header_ext->sequenceNumber);
+            // uint32_t ssrc = util::endian::little(header_ext->ssrc);  // 小端序
+            // if (!validate_mic_ssrc(ssrc, client_id)) {
+            //   return;
+            // }
+            process_audio_data(reinterpret_cast<const uint8_t *>(mic_recv_buffer.data()) + header_size, received_bytes - header_size, sequence_number, client_id);
           }
           return;
         }
       }
 
       // 8位包类型
-      auto *header = (mic_packet_t *) buffer.data();
+      auto *header = (mic_packet_t *) mic_recv_buffer.data();
       if (header->rtp.packetType == MIC_PACKET_TYPE_OPUS) {
         size_t header_size = sizeof(mic_packet_t);
-        if (bytes > header_size) {
-          process_audio_data(reinterpret_cast<const uint8_t *>(buffer.data()) + header_size, bytes - header_size);
+        if (received_bytes > header_size) {
+          // 客户端按小端序发送序列号（MicrophoneStream.java 使用 LITTLE_ENDIAN）
+          // 服务端必须按小端序读取，否则会读错（比如 1 会读成 256）
+          uint16_t sequence_number = util::endian::little(header->rtp.sequenceNumber);
+          // uint32_t ssrc = util::endian::little(header->rtp.ssrc);  // 小端序
+          // if (!validate_mic_ssrc(ssrc, client_id)) {
+          //   return;
+          // }
+          size_t data_size = received_bytes - header_size;
+          
+          // BOOST_LOG(verbose) << "Received MIC packet: total=" << received_bytes 
+          //                 << " bytes, header=" << header_size 
+          //                 << " bytes, data=" << data_size 
+          //                 << " bytes, sequenceNumber=" << sequence_number << " (little-endian)"
+          //                 << " from " << client_id;
+          process_audio_data(reinterpret_cast<const uint8_t *>(mic_recv_buffer.data()) + header_size, data_size, sequence_number, client_id);
         }
       }
     };
 
     BOOST_LOG(debug) << "Starting microphone receive thread";
 
+    auto retry_delay = 300ms;  // 初始重试延迟，指数退避到最大5秒
+
     while (!broadcast_shutdown_event->peek()) {
       if (!ctx.mic_socket_enabled.load()) {
+        retry_delay = 300ms;  // 会话结束时重置延迟
         std::this_thread::sleep_for(100ms);
         continue;
       }
@@ -1346,13 +1719,14 @@ namespace stream {
       // 延迟初始化麦克风设备
       if (!mic_device_initialized) {
         if (audio::init_mic_redirect_device() != 0) {
-          std::this_thread::sleep_for(100ms);
+          std::this_thread::sleep_for(retry_delay);
+          retry_delay = std::min(retry_delay * 2, 5000ms);  // 指数退避，最大5秒
           continue;
         }
         mic_device_initialized = true;
       }
 
-      ctx.mic_sock.async_receive_from(asio::buffer(buffer), peer, 0, mic_recv_func);
+      ctx.mic_sock.async_receive_from(asio::buffer(mic_recv_buffer), peer, 0, mic_recv_func);
 
       while (ctx.mic_socket_enabled.load() && !broadcast_shutdown_event->peek()) {
         io.run();
@@ -1361,6 +1735,21 @@ namespace stream {
 
     if (mic_device_initialized) {
       audio::release_mic_redirect_device();
+    }
+
+    // 打印所有客户端的麦克风解密统计
+    if (!client_stats.empty()) {
+      BOOST_LOG(info) << "=== Microphone Decryption Stats Summary ===";
+      for (const auto &[client, stats] : client_stats) {
+        if (stats.total_packets > 0) {
+          double success_rate = (double)stats.decrypt_success / stats.total_packets * 100.0;
+          BOOST_LOG(info) << "Client " << client << ": "
+                         << "total=" << stats.total_packets
+                         << ", success=" << stats.decrypt_success << " (" << std::fixed << std::setprecision(1) << success_rate << "%)"
+                         << ", failed=" << stats.decrypt_failed
+                         << ", invalid=" << stats.invalid_data;
+        }
+      }
     }
 
     BOOST_LOG(debug) << "Microphone receive thread ended";
@@ -1424,37 +1813,42 @@ namespace stream {
     // 初始化接收函数
     auto init_recv_func = [&](auto &sock, size_t buf_idx, auto &session_map, std::string_view type_str) {
       recv_funcs[buf_idx] = [&, buf_idx, type_str](const boost::system::error_code &ec, size_t bytes) {
+        // 静默处理正常关闭错误
+        if (ec == boost::asio::error::operation_aborted ||
+            ec == boost::asio::error::bad_descriptor) {
+          return;  // Socket已关闭，不重新调度
+        }
+
+        // 静默处理网络连接错误
+        if (ec == boost::system::errc::connection_refused ||
+            ec == boost::system::errc::connection_reset) {
+          return;  // 连接错误，不重新调度
+        }
+
+        // 如果有其他错误，记录并返回
         if (ec) {
           BOOST_LOG(error) << type_str << " receive error: "sv << ec.message();
-          return;
+          return;  // 有错误，不重新调度
         }
-        auto fg = util::fail_guard([&]() {
-          try {
-            sock.async_receive_from(asio::buffer(buffers[buf_idx]), peer, 0, recv_funcs[buf_idx]);
-          }
-          catch (const std::exception &e) {
-            BOOST_LOG(error) << "Failed to restart async receive: " << e.what();
-          }
-        });
 
         BOOST_LOG(verbose) << "Recv: "sv << peer.address().to_string() << ':' << peer.port() << " :: " << type_str;
 
         update_session_map(message_queue_queue, peer_to_video_session, peer_to_audio_session);
-
-        if (ec == boost::system::errc::connection_refused ||
-            ec == boost::system::errc::connection_reset) {
-          return;
-        }
-        if (ec) {
-          BOOST_LOG(error) << "Couldn't receive data from udp socket: "sv << ec.message();
-          return;
-        }
         if (bytes == 0) {
           BOOST_LOG(warning) << "Received empty packet";
-          return;
+          // 即使是空包，也继续接收
+        }
+        else {
+          handle_ping(session_map, peer, buffers[buf_idx], bytes, type_str);
         }
 
-        handle_ping(session_map, peer, buffers[buf_idx], bytes, type_str);
+        // 只有在成功接收数据后才重新调度
+        try {
+          sock.async_receive_from(asio::buffer(buffers[buf_idx]), peer, 0, recv_funcs[buf_idx]);
+        }
+        catch (const std::exception &e) {
+          BOOST_LOG(error) << "Failed to restart async receive: " << e.what();
+        }
       };
     };
 
@@ -1844,8 +2238,42 @@ namespace stream {
 
       auto &shards_p = session->audio.shards_p;
 
-      auto bytes = encode_audio(session->config.encryptionFlagsEnabled & SS_ENC_AUDIO, packet_data,
+      // 检查客户端是否启用了音频加密
+      bool audio_encryption_enabled = (session->config.encryptionFlagsEnabled & SS_ENC_AUDIO) != 0;
+      if (sequenceNumber == 0) {
+        // 只在第一个包时记录一次，避免日志过多
+        BOOST_LOG(info) << "Audio encryption status: encryptionFlagsEnabled=0x" 
+                        << std::hex << session->config.encryptionFlagsEnabled << std::dec
+                        << ", SS_ENC_AUDIO (0x04) check: " << (audio_encryption_enabled ? "enabled" : "disabled")
+                        << ", will " << (audio_encryption_enabled ? "ENCRYPT" : "NOT encrypt") << " audio data";
+      }
+
+      size_t plaintext_size = packet_data.size();
+      
+      // 验证 cipher 是否已初始化
+      if (sequenceNumber == 0) {
+        bool cipher_initialized = (session->audio.cipher.key.size() > 0);
+        BOOST_LOG(info) << "Audio cipher status: initialized=" << (cipher_initialized ? "yes" : "no")
+                        << ", key_size=" << session->audio.cipher.key.size();
+      }
+      
+      auto bytes = encode_audio(audio_encryption_enabled, packet_data,
         shards_p[sequenceNumber % RTPA_DATA_SHARDS], iv, session->audio.cipher);
+      
+      if (sequenceNumber == 0) {
+        // 验证加密是否真的执行了
+        if (audio_encryption_enabled) {
+          // 加密后的大小应该大于等于明文（因为 PKCS5 填充）
+          bool encryption_applied = (bytes >= plaintext_size && bytes % 16 == 0);
+          BOOST_LOG(info) << "Audio packet encryption: plaintext_size=" << plaintext_size 
+                          << ", encrypted_size=" << bytes
+                          << ", encryption " << (encryption_applied ? "SUCCESS (data is encrypted)" : "FAILED (data may not be encrypted)");
+        } else {
+          BOOST_LOG(info) << "Audio packet: plaintext_size=" << plaintext_size 
+                          << ", output_size=" << bytes
+                          << " (NOT encrypted, sent as plaintext)";
+        }
+      }
       if (bytes < 0) {
         BOOST_LOG(error) << "Couldn't encode audio packet"sv;
         break;
@@ -1943,7 +2371,14 @@ namespace stream {
       BOOST_LOG(error) << "Failed to set video socket send buffer size (SO_SENDBUF)";
     }
 
-    ctx.video_sock.bind(udp::endpoint(protocol, video_port), ec);
+    auto bind_addr_str = net::get_bind_address(address_family);
+    const auto bind_addr = boost::asio::ip::make_address(bind_addr_str, ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Invalid bind address: "sv << bind_addr_str << " - " << ec.message();
+      return -1;
+    }
+
+    ctx.video_sock.bind(udp::endpoint(bind_addr, video_port), ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Video server to port ["sv << video_port << "]: "sv << ec.message();
 
@@ -1957,26 +2392,30 @@ namespace stream {
       return -1;
     }
 
-    ctx.audio_sock.bind(udp::endpoint(protocol, audio_port), ec);
+    ctx.audio_sock.bind(udp::endpoint(bind_addr, audio_port), ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Audio server to port ["sv << audio_port << "]: "sv << ec.message();
 
       return -1;
     }
 
-    // 总是启动麦克风socket，后续根据会话需要决定是否关闭
-    ctx.mic_sock.open(protocol, ec);
-    if (ec) {
-      BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
-      return -1;
+    // 仅在启用麦克风串流时启动麦克风socket
+    if (config::audio.stream_mic) {
+      ctx.mic_sock.open(protocol, ec);
+      if (ec) {
+        BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
+        return -1;
+      }
+      ctx.mic_sock.bind(udp::endpoint(protocol, mic_port), ec);
+      if (ec) {
+        BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << mic_port << "]: "sv << ec.message();
+        return -1;
+      }
+      ctx.mic_socket_enabled.store(true);
+      BOOST_LOG(info) << "Microphone socket started on port " << mic_port;
+    } else {
+      BOOST_LOG(info) << "Microphone streaming disabled by config";
     }
-    ctx.mic_sock.bind(udp::endpoint(protocol, mic_port), ec);
-    if (ec) {
-      BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << mic_port << "]: "sv << ec.message();
-      return -1;
-    }
-    ctx.mic_socket_enabled.store(true);
-    BOOST_LOG(info) << "Microphone socket started on port " << mic_port;
 
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
@@ -2009,12 +2448,23 @@ namespace stream {
     ctx.video_sock.close();
     ctx.audio_sock.close();
 
-    // 确保麦克风socket已关闭并重置计数器
+    // 确保麦克风socket已关闭并清理敏感数据
     if (ctx.mic_socket_enabled.load()) {
       ctx.mic_socket_enabled.store(false);
       ctx.mic_sock.close();
       ctx.mic_sessions_count.store(0);
-      BOOST_LOG(debug) << "Microphone socket closed during broadcast shutdown";
+      
+      // 安全清理：清零所有麦克风加密相关的敏感数据
+      {
+        std::lock_guard<std::mutex> lg(ctx.mic_cipher_mutex);
+        if (ctx.mic_cipher.has_value()) {
+          ctx.mic_cipher.reset();  // 销毁cipher对象并释放密钥
+        }
+        std::memset(ctx.mic_iv.data(), 0, ctx.mic_iv.size());  // 清零IV
+        ctx.mic_encryption_enabled.store(false);
+      }
+      
+      BOOST_LOG(debug) << "Microphone socket closed and encryption context securely cleared";
     }
 
     video_packets.reset();
@@ -2111,6 +2561,8 @@ namespace stream {
       session->video.peer.port(), platf::qos_data_type_e::video, session->config.videoQosType != 0);
 
     BOOST_LOG(debug) << "Start capturing Video"sv;
+    // Debug: Log the display_name before calling video::capture
+    BOOST_LOG(debug) << "stream.cpp: session->config.monitor.display_name = [" << (session->config.monitor.display_name.empty() ? "<empty>" : session->config.monitor.display_name) << "]";
     video::capture(session->mail, session->config.monitor, session, session->video.dynamic_param_change_events);
   }
 
@@ -2139,6 +2591,7 @@ namespace stream {
 
   namespace session {
     std::atomic_uint running_sessions;
+    std::atomic_uint running_non_control_only_sessions;  // 跟踪非仅控制流会话的数量
 
     state_e
     state(session_t &session) {
@@ -2173,54 +2626,70 @@ namespace stream {
         task_pool.cancel(force_kill);
       });
 
-      BOOST_LOG(debug) << "Waiting for video to end..."sv;
-      session.videoThread.join();
-      BOOST_LOG(debug) << "Waiting for audio to end..."sv;
-      session.audioThread.join();
+      // 仅控制流会话没有视频/音频线程
+      if (!session.control_only) {
+        BOOST_LOG(debug) << "Waiting for video to end..."sv;
+        session.videoThread.join();
+        BOOST_LOG(debug) << "Waiting for audio to end..."sv;
+        session.audioThread.join();
+      }
+      else {
+        BOOST_LOG(debug) << "Control-only session: skipping video/audio thread join"sv;
+      }
       BOOST_LOG(debug) << "Waiting for control to end..."sv;
       session.controlEnd.view();
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
 
-      // If this is the last session, invoke the platform callbacks
-      if (--running_sessions == 0) {
-        // 最后一个会话结束时，确保麦克风socket已关闭
-        if (session.broadcast_ref->mic_socket_enabled.load()) {
-          session.broadcast_ref->mic_sock.close();
-          session.broadcast_ref->mic_socket_enabled.store(false);
-          session.broadcast_ref->mic_sessions_count.store(0);
-          BOOST_LOG(debug) << "Microphone socket closed (last session ended)";
-        }
-
-        bool restore_display_state { true };
-        if (proc::proc.running()) {
-#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
-          system_tray::update_tray_pausing(proc::proc.get_last_run_app_name());
-#endif
-
-          // TODO: make this configurable per app
-          restore_display_state = false;
-        }
-
-        if (restore_display_state) {
-          display_device::session_t::get().restore_state();
-        }
-
-        platf::streaming_will_stop();
+      // 对于仅控制流会话，只减少总会话计数，不调用 streaming_will_stop
+      // 只有当所有非控制流会话都结束时才调用 streaming_will_stop
+      if (session.control_only) {
+        --running_sessions;
+        BOOST_LOG(debug) << "Control-only session ended (remaining sessions: "sv << running_sessions.load() << ")"sv;
       }
       else {
-        // 非最后一个会话：如果当前会话启用了麦克风，减少计数
-        if (session.audio.enable_mic) {
-          int remaining_count = session.broadcast_ref->mic_sessions_count.fetch_sub(1) - 1;
-          if (remaining_count == 0) {
-            // 没有会话需要麦克风了，关闭socket
+        // 非仅控制流会话：减少两个计数器
+        --running_sessions;
+        // If this is the last non-control-only session, invoke the platform callbacks
+        if (--running_non_control_only_sessions == 0) {
+          // 最后一个会话结束时，确保麦克风socket已关闭
+          if (session.broadcast_ref->mic_socket_enabled.load()) {
             session.broadcast_ref->mic_sock.close();
             session.broadcast_ref->mic_socket_enabled.store(false);
-            BOOST_LOG(debug) << "Microphone socket closed (no sessions require it)";
+            session.broadcast_ref->mic_sessions_count.store(0);
+            BOOST_LOG(debug) << "Microphone socket closed (last session ended)";
           }
-          else {
-            BOOST_LOG(debug) << "Microphone sessions remaining: " << remaining_count;
+
+          bool restore_display_state { true };
+          if (proc::proc.running()) {
+#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
+            system_tray::update_tray_pausing(proc::proc.get_last_run_app_name());
+#endif
+
+            // TODO: make this configurable per app
+            restore_display_state = false;
+          }
+
+          if (restore_display_state) {
+            display_device::session_t::get().restore_state();
+          }
+
+          platf::streaming_will_stop();
+        }
+        else {
+          // 非最后一个会话：如果当前会话启用了麦克风，减少计数
+          if (session.audio.enable_mic) {
+            int remaining_count = session.broadcast_ref->mic_sessions_count.fetch_sub(1) - 1;
+            if (remaining_count == 0) {
+              // 没有会话需要麦克风了，关闭socket
+              session.broadcast_ref->mic_sock.close();
+              session.broadcast_ref->mic_socket_enabled.store(false);
+              BOOST_LOG(debug) << "Microphone socket closed (no sessions require it)";
+            }
+            else {
+              BOOST_LOG(debug) << "Microphone sessions remaining: " << remaining_count;
+            }
           }
         }
       }
@@ -2238,7 +2707,12 @@ namespace stream {
       }
 
       session.control.expected_peer_address = addr_string;
-      BOOST_LOG(debug) << "Expecting incoming session connections from "sv << addr_string;
+      if (session.control_only) {
+        BOOST_LOG(info) << "Starting control-only session from ["sv << addr_string << "] - will only handle input control"sv;
+      }
+      else {
+        BOOST_LOG(debug) << "Expecting incoming session connections from "sv << addr_string;
+      }
 
       // Insert this session into the session list
       {
@@ -2255,37 +2729,90 @@ namespace stream {
 
       session.pingTimeout = std::chrono::steady_clock::now() + config::stream.ping_timeout;
 
-      session.audioThread = std::thread { audioThread, &session };
-      session.videoThread = std::thread { videoThread, &session };
+      // 仅控制流会话不启动视频/音频线程
+      if (!session.control_only) {
+        session.audioThread = std::thread { audioThread, &session };
+        session.videoThread = std::thread { videoThread, &session };
+      }
+      else {
+        BOOST_LOG(debug) << "Control-only session: skipping video and audio thread creation"sv;
+      }
 
       session.state.store(state_e::RUNNING, std::memory_order_relaxed);
 
-      // If this is the first session, invoke the platform callbacks
-      if (++running_sessions == 1) {
-        // 根据会话的麦克风启用标志管理麦克风socket
-        if (session.audio.enable_mic) {
-          session.broadcast_ref->mic_sessions_count.fetch_add(1);
-          session.broadcast_ref->mic_socket_enabled.store(true);
-          BOOST_LOG(debug) << "Microphone socket enabled for session";
-        }
-        else {
-          // 如果第一个会话不需要麦克风，关闭麦克风socket
-          session.broadcast_ref->mic_sock.close();
-          session.broadcast_ref->mic_socket_enabled.store(false);
-          BOOST_LOG(debug) << "Microphone socket closed (session doesn't require it)";
-        }
-
-        platf::streaming_will_start();
-#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
-        system_tray::update_tray_playing(proc::proc.get_last_run_app_name());
-#endif
+      // 仅控制流会话不触发 streaming_will_start 回调，因为它们不传输视频/音频
+      // 但它们仍然需要被计入 running_sessions，以便正确管理会话
+      if (session.control_only) {
+        // 仅控制流会话：只增加总会话计数，不调用平台回调
+        ++running_sessions;
+        BOOST_LOG(debug) << "Control-only session started (total sessions: "sv << running_sessions.load() << ")"sv;
       }
       else {
-        // 非第一个会话：如果启用麦克风，增加计数
-        if (session.audio.enable_mic) {
-          session.broadcast_ref->mic_sessions_count.fetch_add(1);
-          session.broadcast_ref->mic_socket_enabled.store(true);
-          BOOST_LOG(debug) << "Microphone socket enabled for additional session";
+        // 非仅控制流会话：增加两个计数器
+        ++running_sessions;
+        // If this is the first non-control-only session, invoke the platform callbacks
+        if (++running_non_control_only_sessions == 1) {
+          // 根据会话的麦克风启用标志管理麦克风socket
+          if (session.audio.enable_mic) {
+            session.broadcast_ref->mic_sessions_count.fetch_add(1);
+            session.broadcast_ref->mic_socket_enabled.store(true);
+            
+            // 注册客户端IP到名称的映射（用于麦克风统计日志）
+            std::string client_ip = session.audio.peer.address().to_string();
+            {
+              std::lock_guard<std::mutex> lg(session.broadcast_ref->client_name_mutex);
+              session.broadcast_ref->client_ip_to_name[client_ip] = session.client_name;
+              BOOST_LOG(debug) << "Mic Registered client mapping: " << client_ip << " -> " << session.client_name;
+            }
+            
+            // 检查是否需要启用 MIC 加密
+            bool should_enable_mic_encryption = (session.config.encryptionFlagsEnabled & SS_ENC_MIC) != 0;
+            if (should_enable_mic_encryption) {
+              std::lock_guard<std::mutex> lg(session.broadcast_ref->mic_cipher_mutex);
+              if (!session.broadcast_ref->mic_cipher) {
+                session.broadcast_ref->mic_cipher.emplace(session.audio.cipher.key, session.audio.cipher.padding);
+                session.broadcast_ref->mic_iv.resize(16);
+                // 初始化 IV：前 4 字节存储 baseIv（大端序）
+                // baseIv 对应客户端的 remoteInputAesIv 的前 4 字节
+                // avRiKeyId 就是 launch_session.iv 的前 4 字节（大端序），与 remoteInputAesIv 的前 4 字节相同
+                *(std::uint32_t *) session.broadcast_ref->mic_iv.data() = util::endian::big<std::uint32_t>(session.audio.avRiKeyId);
+                // 其余字节保持为 0（IV 是 16 字节，但只使用前 4 字节）
+                std::memset(session.broadcast_ref->mic_iv.data() + 4, 0, 12);
+                session.broadcast_ref->mic_encryption_enabled.store(true);
+              }
+              BOOST_LOG(info) << "Client " << session.client_name << ": Microphone encryption ENABLED";
+            } else {
+              BOOST_LOG(info) << "Client " << session.client_name << ": Microphone encryption DISABLED";
+            }
+          }
+          else {
+            // 如果第一个会话不需要麦克风，关闭麦克风socket
+            session.broadcast_ref->mic_sock.close();
+            session.broadcast_ref->mic_socket_enabled.store(false);
+            BOOST_LOG(info) << "Client " << session.client_name << ": Microphone socket closed (session doesn't require it)";
+          }
+
+          platf::streaming_will_start();
+#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
+          system_tray::update_tray_playing(proc::proc.get_last_run_app_name());
+#endif
+        }
+        else {
+          // 非第一个会话：如果启用麦克风，增加计数
+          if (session.audio.enable_mic) {
+            session.broadcast_ref->mic_sessions_count.fetch_add(1);
+            session.broadcast_ref->mic_socket_enabled.store(true);
+            
+            // 注册客户端IP到名称的映射
+            std::string client_ip = session.audio.peer.address().to_string();
+            {
+              std::lock_guard<std::mutex> lg(session.broadcast_ref->client_name_mutex);
+              session.broadcast_ref->client_ip_to_name[client_ip] = session.client_name;
+              BOOST_LOG(debug) << "Registered client mapping: " << client_ip << " -> " << session.client_name;
+            }
+            
+            BOOST_LOG(debug) << "Microphone socket enabled for additional session";
+          }
         }
       }
 
@@ -2303,6 +2830,13 @@ namespace stream {
 
       // 设置客户端名称
       session->client_name = launch_session.client_name;
+
+      // 保存 launch_session 的关键字段，用于后续动态参数更新
+      session->enable_sops = launch_session.enable_sops;
+      session->enable_hdr = launch_session.enable_hdr;
+      session->max_nits = launch_session.max_nits;
+      session->min_nits = launch_session.min_nits;
+      session->max_full_nits = launch_session.max_full_nits;
 
       session->config = config;
 
@@ -2323,6 +2857,7 @@ namespace stream {
       session->control.connect_data = launch_session.control_connect_data;
       session->control.feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);
       session->control.hdr_queue = mail->event<video::hdr_info_t>(mail::hdr);
+      session->control.resolution_change_queue = mail->event<std::pair<std::uint32_t, std::uint32_t>>(mail::resolution_change);
       session->control.legacy_input_enc_iv = launch_session.iv;
       session->control.cipher = crypto::cipher::gcm_t {
         launch_session.gcm_key, false
@@ -2373,6 +2908,8 @@ namespace stream {
       session->audio.timestamp = 0;
 
       session->audio.enable_mic = launch_session.enable_mic;
+
+      session->control_only = launch_session.control_only;
 
       session->control.peer = nullptr;
       session->state.store(state_e::STOPPED, std::memory_order_relaxed);

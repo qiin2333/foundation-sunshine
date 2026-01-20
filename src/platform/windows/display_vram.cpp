@@ -110,10 +110,17 @@ namespace platf::dxgi {
   blob_t convert_yuv420_packed_uv_type0s_ps_linear_hlsl;
   blob_t convert_yuv420_packed_uv_type0s_ps_perceptual_quantizer_hlsl;
   blob_t convert_yuv420_packed_uv_type0s_vs_hlsl;
+  blob_t convert_yuv420_packed_uv_bicubic_ps_hlsl;
+  blob_t convert_yuv420_packed_uv_bicubic_ps_linear_hlsl;
+  blob_t convert_yuv420_packed_uv_bicubic_ps_perceptual_quantizer_hlsl;
+  blob_t convert_yuv420_packed_uv_bicubic_vs_hlsl;
   blob_t convert_yuv420_planar_y_ps_hlsl;
   blob_t convert_yuv420_planar_y_ps_linear_hlsl;
   blob_t convert_yuv420_planar_y_ps_perceptual_quantizer_hlsl;
   blob_t convert_yuv420_planar_y_vs_hlsl;
+  blob_t convert_yuv420_planar_y_bicubic_ps_hlsl;
+  blob_t convert_yuv420_planar_y_bicubic_ps_linear_hlsl;
+  blob_t convert_yuv420_planar_y_bicubic_ps_perceptual_quantizer_hlsl;
   blob_t convert_yuv444_packed_ayuv_ps_hlsl;
   blob_t convert_yuv444_packed_ayuv_ps_linear_hlsl;
   blob_t convert_yuv444_packed_vs_hlsl;
@@ -506,53 +513,99 @@ namespace platf::dxgi {
   }
 
       const bool downscaling = display->width > width || display->height > height;
+      // Determine downscaling quality based on config
+      // "fast" = bilinear + 8pt average (original method)
+      // "balanced" = bicubic (default, best quality/performance balance)
+      // "high_quality" = reserved for future lanczos implementation
+      const bool use_bicubic = downscaling && 
+                               (config::video.downscaling_quality == "balanced" || 
+                                config::video.downscaling_quality == "high_quality");
+      
+      if (downscaling) {
+        BOOST_LOG(info) << "Downscaling from " << display->width << "x" << display->height 
+                        << " to " << width << "x" << height 
+                        << " using quality: " << config::video.downscaling_quality
+                        << (use_bicubic ? " (bicubic)" : " (bilinear+8pt)");
+      }
 
       switch (format) {
         case DXGI_FORMAT_NV12:
           // Semi-planar 8-bit YUV 4:2:0
-          create_vertex_shader_helper(convert_yuv420_planar_y_vs_hlsl, convert_Y_or_YUV_vs);
-          create_pixel_shader_helper(convert_yuv420_planar_y_ps_hlsl, convert_Y_or_YUV_ps);
-          create_pixel_shader_helper(convert_yuv420_planar_y_ps_linear_hlsl, convert_Y_or_YUV_fp16_ps);
-          if (downscaling) {
-            create_vertex_shader_helper(convert_yuv420_packed_uv_type0s_vs_hlsl, convert_UV_vs);
-            create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_hlsl, convert_UV_ps);
-            create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_linear_hlsl, convert_UV_fp16_ps);
+          if (use_bicubic) {
+            // Use bicubic sampling for high-quality downscaling
+            create_vertex_shader_helper(convert_yuv420_planar_y_vs_hlsl, convert_Y_or_YUV_vs);
+            create_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_hlsl, convert_Y_or_YUV_ps);
+            create_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_linear_hlsl, convert_Y_or_YUV_fp16_ps);
+            create_vertex_shader_helper(convert_yuv420_packed_uv_bicubic_vs_hlsl, convert_UV_vs);
+            create_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_hlsl, convert_UV_ps);
+            create_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_linear_hlsl, convert_UV_fp16_ps);
           }
           else {
-            create_vertex_shader_helper(convert_yuv420_packed_uv_type0_vs_hlsl, convert_UV_vs);
-            create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_hlsl, convert_UV_ps);
-            create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_linear_hlsl, convert_UV_fp16_ps);
+            create_vertex_shader_helper(convert_yuv420_planar_y_vs_hlsl, convert_Y_or_YUV_vs);
+            create_pixel_shader_helper(convert_yuv420_planar_y_ps_hlsl, convert_Y_or_YUV_ps);
+            create_pixel_shader_helper(convert_yuv420_planar_y_ps_linear_hlsl, convert_Y_or_YUV_fp16_ps);
+            if (downscaling) {
+              create_vertex_shader_helper(convert_yuv420_packed_uv_type0s_vs_hlsl, convert_UV_vs);
+              create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_hlsl, convert_UV_ps);
+              create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_linear_hlsl, convert_UV_fp16_ps);
+            }
+            else {
+              create_vertex_shader_helper(convert_yuv420_packed_uv_type0_vs_hlsl, convert_UV_vs);
+              create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_hlsl, convert_UV_ps);
+              create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_linear_hlsl, convert_UV_fp16_ps);
+            }
           }
           break;
 
         case DXGI_FORMAT_P010:
           // Semi-planar 16-bit YUV 4:2:0, 10 most significant bits store the value
-          create_vertex_shader_helper(convert_yuv420_planar_y_vs_hlsl, convert_Y_or_YUV_vs);
-          create_pixel_shader_helper(convert_yuv420_planar_y_ps_hlsl, convert_Y_or_YUV_ps);
-          if (display->is_hdr()) {
-            create_pixel_shader_helper(convert_yuv420_planar_y_ps_perceptual_quantizer_hlsl, convert_Y_or_YUV_fp16_ps);
-          }
-          else {
-            create_pixel_shader_helper(convert_yuv420_planar_y_ps_linear_hlsl, convert_Y_or_YUV_fp16_ps);
-          }
-          if (downscaling) {
-            create_vertex_shader_helper(convert_yuv420_packed_uv_type0s_vs_hlsl, convert_UV_vs);
-            create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_hlsl, convert_UV_ps);
+          if (use_bicubic) {
+            // Use bicubic sampling for high-quality downscaling
+            create_vertex_shader_helper(convert_yuv420_planar_y_vs_hlsl, convert_Y_or_YUV_vs);
+            create_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_hlsl, convert_Y_or_YUV_ps);
             if (display->is_hdr()) {
-              create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_perceptual_quantizer_hlsl, convert_UV_fp16_ps);
+              create_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_perceptual_quantizer_hlsl, convert_Y_or_YUV_fp16_ps);
             }
             else {
-              create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_linear_hlsl, convert_UV_fp16_ps);
+              create_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_linear_hlsl, convert_Y_or_YUV_fp16_ps);
+            }
+            create_vertex_shader_helper(convert_yuv420_packed_uv_bicubic_vs_hlsl, convert_UV_vs);
+            create_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_hlsl, convert_UV_ps);
+            if (display->is_hdr()) {
+              create_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_perceptual_quantizer_hlsl, convert_UV_fp16_ps);
+            }
+            else {
+              create_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_linear_hlsl, convert_UV_fp16_ps);
             }
           }
           else {
-            create_vertex_shader_helper(convert_yuv420_packed_uv_type0_vs_hlsl, convert_UV_vs);
-            create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_hlsl, convert_UV_ps);
+            create_vertex_shader_helper(convert_yuv420_planar_y_vs_hlsl, convert_Y_or_YUV_vs);
+            create_pixel_shader_helper(convert_yuv420_planar_y_ps_hlsl, convert_Y_or_YUV_ps);
             if (display->is_hdr()) {
-              create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_perceptual_quantizer_hlsl, convert_UV_fp16_ps);
+              create_pixel_shader_helper(convert_yuv420_planar_y_ps_perceptual_quantizer_hlsl, convert_Y_or_YUV_fp16_ps);
             }
             else {
-              create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_linear_hlsl, convert_UV_fp16_ps);
+              create_pixel_shader_helper(convert_yuv420_planar_y_ps_linear_hlsl, convert_Y_or_YUV_fp16_ps);
+            }
+            if (downscaling) {
+              create_vertex_shader_helper(convert_yuv420_packed_uv_type0s_vs_hlsl, convert_UV_vs);
+              create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_hlsl, convert_UV_ps);
+              if (display->is_hdr()) {
+                create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_perceptual_quantizer_hlsl, convert_UV_fp16_ps);
+              }
+              else {
+                create_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_linear_hlsl, convert_UV_fp16_ps);
+              }
+            }
+            else {
+              create_vertex_shader_helper(convert_yuv420_packed_uv_type0_vs_hlsl, convert_UV_vs);
+              create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_hlsl, convert_UV_ps);
+              if (display->is_hdr()) {
+                create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_perceptual_quantizer_hlsl, convert_UV_fp16_ps);
+              }
+              else {
+                create_pixel_shader_helper(convert_yuv420_packed_uv_type0_ps_linear_hlsl, convert_UV_fp16_ps);
+              }
             }
           }
           break;
@@ -820,12 +873,21 @@ namespace platf::dxgi {
 
       status = device->CreateSamplerState(&sampler_desc, &sampler_linear);
       if (FAILED(status)) {
-        BOOST_LOG(error) << "Failed to create point sampler state [0x"sv << util::hex(status).to_string_view() << ']';
+        BOOST_LOG(error) << "Failed to create linear sampler state [0x"sv << util::hex(status).to_string_view() << ']';
         return -1;
       }
 
       device_ctx->OMSetBlendState(blend_disable.get(), nullptr, 0xFFFFFFFFu);
-      device_ctx->PSSetSamplers(0, 1, &sampler_linear);
+      // s0 = linear (existing shaders), s1 = point (high-quality resampling shaders)
+      sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+      status = device->CreateSamplerState(&sampler_desc, &sampler_point);
+      if (FAILED(status)) {
+        BOOST_LOG(error) << "Failed to create point sampler state [0x"sv << util::hex(status).to_string_view() << ']';
+        return -1;
+      }
+
+      ID3D11SamplerState *samplers[] = { sampler_linear.get(), sampler_point.get() };
+      device_ctx->PSSetSamplers(0, 2, samplers);
       device_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
       return 0;
@@ -940,6 +1002,7 @@ namespace platf::dxgi {
 
     blend_t blend_disable;
     sampler_state_t sampler_linear;
+    sampler_state_t sampler_point;
 
     render_target_t out_Y_or_YUV_rtv;
     render_target_t out_UV_rtv;
@@ -1278,13 +1341,13 @@ namespace platf::dxgi {
         // We got a new frame from DesktopDuplication...
         if (blend_mouse_cursor_flag) {
           // ...and we need to blend the mouse cursor onto it.
-          // Copy the frame to intermediate surface so we can blend this and future mouse cursor updates
-          // without new frames from DesktopDuplication. We use direct3d surface directly here and not
-          // an image from pull_free_image_cb mainly because it's lighter (surface sharing between
-          // direct3d devices produce significant memory overhead).
-          last_frame_action = lfa::copy_src_to_surface;
-          // Copy the intermediate surface to a new image from pull_free_image_cb and blend the mouse cursor onto it.
-          out_frame_action = ofa::copy_last_surface_and_blend_cursor;
+          // Optimization: Directly copy to target image and blend cursor, avoiding intermediate surface copy.
+          // This reduces one texture copy operation when we have a new frame.
+          // We still use intermediate surface for cursor-only updates (no new frame) to avoid
+          // memory overhead from sharing images between direct3d devices.
+          last_frame_action = lfa::copy_src_to_img;
+          // Blend cursor directly onto the image we just copied to.
+          out_frame_action = ofa::copy_last_surface_and_blend_cursor;  // Reused for direct blend
         }
         else {
           // ...and we don't need to blend the mouse cursor.
@@ -1487,23 +1550,59 @@ namespace platf::dxgi {
       }
 
       case ofa::copy_last_surface_and_blend_cursor: {
-        auto p_surface = std::get_if<texture2d_t>(&last_frame_variant);
-        if (!p_surface) {
-          BOOST_LOG(error) << "Logical error at " << __FILE__ << ":" << __LINE__;
-          return capture_e::error;
-        }
         if (!blend_mouse_cursor_flag) {
           BOOST_LOG(error) << "Logical error at " << __FILE__ << ":" << __LINE__;
           return capture_e::error;
         }
 
-        if (!pull_free_image_cb(img_out)) return capture_e::interrupted;
+        // Optimization: Check if we have an image (from direct copy) or surface (from previous frame)
+        auto p_img = std::get_if<std::shared_ptr<platf::img_t>>(&last_frame_variant);
+        auto p_surface = std::get_if<texture2d_t>(&last_frame_variant);
+        
+        if (p_img && p_img->use_count() == 1) {
+          // Optimization: We have a direct image copy that's not yet used by encoder,
+          // blend cursor directly onto it to avoid an extra texture copy.
+          img_out = *p_img;
+          auto d3d_img = std::static_pointer_cast<img_d3d_t>(img_out);
+          texture_lock_helper lock_helper(d3d_img->capture_mutex.get());
+          if (!lock_helper.lock()) {
+            BOOST_LOG(error) << "Failed to lock capture texture for cursor blend";
+            return capture_e::error;
+          }
+          blend_cursor(*d3d_img);
+        }
+        else if (p_surface) {
+          // We have an intermediate surface, copy it first then blend
+          if (!pull_free_image_cb(img_out)) return capture_e::interrupted;
 
-        auto [d3d_img, lock] = get_locked_d3d_img(img_out);
-        if (!d3d_img) return capture_e::error;
+          auto [d3d_img, lock] = get_locked_d3d_img(img_out);
+          if (!d3d_img) return capture_e::error;
 
-        device_ctx->CopyResource(d3d_img->capture_texture.get(), p_surface->get());
-        blend_cursor(*d3d_img);
+          device_ctx->CopyResource(d3d_img->capture_texture.get(), p_surface->get());
+          blend_cursor(*d3d_img);
+        }
+        else if (p_img) {
+          // Image is already in use by encoder, we need to get a new one
+          // This case is rare and indicates the image was consumed before cursor blend
+          // Fall back to creating a surface and copying (original behavior)
+          if (!pull_free_image_cb(img_out)) return capture_e::interrupted;
+
+          auto [d3d_img, lock] = get_locked_d3d_img(img_out);
+          if (!d3d_img) return capture_e::error;
+
+          // Copy from the image that's in use (it should still be valid for reading)
+          // Note: This creates an extra copy, but it's a rare edge case
+          auto d3d_img_src = std::static_pointer_cast<img_d3d_t>(*p_img);
+          texture_lock_helper src_lock_helper(d3d_img_src->capture_mutex.get());
+          if (src_lock_helper.lock()) {
+            device_ctx->CopyResource(d3d_img->capture_texture.get(), d3d_img_src->capture_texture.get());
+          }
+          blend_cursor(*d3d_img);
+        }
+        else {
+          BOOST_LOG(error) << "Logical error at " << __FILE__ << ":" << __LINE__;
+          return capture_e::error;
+        }
         break;
       }
 
@@ -1565,6 +1664,13 @@ namespace platf::dxgi {
 
     auto status = device->CreateSamplerState(&sampler_desc, &sampler_linear);
     if (FAILED(status)) {
+      BOOST_LOG(error) << "Failed to create linear sampler state [0x"sv << util::hex(status).to_string_view() << ']';
+      return -1;
+    }
+
+    sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    status = device->CreateSamplerState(&sampler_desc, &sampler_point);
+    if (FAILED(status)) {
       BOOST_LOG(error) << "Failed to create point sampler state [0x"sv << util::hex(status).to_string_view() << ']';
       return -1;
     }
@@ -1623,7 +1729,8 @@ namespace platf::dxgi {
     }
 
     device_ctx->OMSetBlendState(blend_disable.get(), nullptr, 0xFFFFFFFFu);
-    device_ctx->PSSetSamplers(0, 1, &sampler_linear);
+    ID3D11SamplerState *samplers[] = { sampler_linear.get(), sampler_point.get() };
+    device_ctx->PSSetSamplers(0, 2, samplers);
     device_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     return 0;
@@ -1789,22 +1896,61 @@ namespace platf::dxgi {
    */
   capture_e
   display_wgc_vram_t::snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) {
+    // Check if window is still valid (if capturing a window)
+    // If window becomes invalid (closed, minimized, hidden), fall back to display capture
+    if (!dup.is_window_valid()) {
+      BOOST_LOG(warning) << "Captured window is no longer valid (closed, minimized, or hidden), falling back to display capture"sv;
+      return capture_e::reinit;
+    }
+    
     texture2d_t src;
     uint64_t frame_qpc;
     dup.set_cursor_visible(cursor_visible);
     auto capture_status = dup.next_frame(timeout, &src, frame_qpc);
-    if (capture_status != capture_e::ok)
+    if (capture_status != capture_e::ok) {
+      // If we're capturing a window and getting timeouts/errors, check if window is still valid
+      if (dup.captured_window_hwnd != nullptr) {
+        // Simplified: Any error or timeout means window might have changed, check validity
+        if (!dup.is_window_valid()) {
+          BOOST_LOG(warning) << "Captured window is no longer valid, reinitializing capture"sv;
+          return capture_e::reinit;
+        }
+      }
       return capture_status;
+    }
 
     auto frame_timestamp = std::chrono::steady_clock::now() - qpc_time_difference(qpc_counter(), frame_qpc);
     D3D11_TEXTURE2D_DESC desc;
     src->GetDesc(&desc);
 
-    // It's possible for our display enumeration to race with mode changes and result in
-    // mismatched image pool and desktop texture sizes. If this happens, just reinit again.
-    if (desc.Width != width_before_rotation || desc.Height != height_before_rotation) {
-      BOOST_LOG(info) << "Capture size changed ["sv << width << 'x' << height << " -> "sv << desc.Width << 'x' << desc.Height << ']';
-      return capture_e::reinit;
+    // Get the actual captured frame dimensions
+    int frame_width = static_cast<int>(desc.Width);
+    int frame_height = static_cast<int>(desc.Height);
+    
+    // For window capture, check if size changed and handle it
+    if (dup.captured_window_hwnd != nullptr) {
+      int expected_width = dup.window_capture_width > 0 ? dup.window_capture_width : width_before_rotation;
+      int expected_height = dup.window_capture_height > 0 ? dup.window_capture_height : height_before_rotation;
+      
+      if (frame_width != expected_width || frame_height != expected_height) {
+        BOOST_LOG(info) << "Window capture size changed ["sv << expected_width << 'x' << expected_height 
+                         << " -> "sv << frame_width << 'x' << frame_height << ']';
+        // Update stored dimensions
+        dup.window_capture_width = frame_width;
+        dup.window_capture_height = frame_height;
+        // Trigger reinit to recreate all resources (images, textures, etc.) with new size
+        return capture_e::reinit;
+      }
+    }
+    else {
+      // For display capture with WGC, the frame dimensions are in "display orientation"
+      // (i.e., after rotation). Our `width`/`height` are derived from DesktopCoordinates
+      // and match that orientation. Using width_before_rotation/height_before_rotation
+      // here can cause an infinite reinit loop on rotation.
+      if (frame_width != width || frame_height != height) {
+        BOOST_LOG(info) << "Capture size changed ["sv << width << 'x' << height << " -> "sv << frame_width << 'x' << frame_height << ']';
+        return capture_e::reinit;
+      }
     }
 
     // It's also possible for the capture format to change on the fly. If that happens,
@@ -1846,10 +1992,37 @@ namespace platf::dxgi {
     return dup.release_frame();
   }
 
+  std::shared_ptr<platf::img_t>
+  display_wgc_vram_t::alloc_img() {
+    auto img = std::make_shared<img_d3d_t>();
+    
+    // For window capture, use window capture dimensions; for display capture, use display dimensions
+    int img_width = dup.window_capture_width > 0 ? dup.window_capture_width : width;
+    int img_height = dup.window_capture_height > 0 ? dup.window_capture_height : height;
+    
+    img->width = img_width;
+    img->height = img_height;
+    img->id = next_image_id++;
+    img->blank = true;
+
+    return img;
+  }
+
   int
   display_wgc_vram_t::init(const ::video::config_t &config, const std::string &display_name) {
     if (display_base_t::init(config, display_name) || dup.init(this, config))
       return -1;
+
+    // WGC frames are typically delivered in the current display orientation.
+    // The DXGI rotation flag comes from the output descriptor and is needed for DDX,
+    // but for WGC it can lead to applying rotation twice (client sees flipped/stretched).
+    if (display_rotation != DXGI_MODE_ROTATION_UNSPECIFIED &&
+        display_rotation != DXGI_MODE_ROTATION_IDENTITY) {
+      BOOST_LOG(info) << "WGC: disabling DXGI rotation handling for oriented frames";
+      display_rotation = DXGI_MODE_ROTATION_UNSPECIFIED;
+      width_before_rotation = width;
+      height_before_rotation = height;
+    }
 
     return 0;
   }
@@ -2085,10 +2258,56 @@ namespace platf::dxgi {
 
   std::unique_ptr<nvenc_encode_device_t>
   display_vram_t::make_nvenc_encode_device(pix_fmt_e pix_fmt) {
+    // For hybrid graphics laptops, NVENC encoder requires NVIDIA GPU,
+    // but display capture may use integrated graphics (built-in screen).
+    // We need to find the NVIDIA adapter for encoding, not the capture adapter.
+    adapter_t::pointer nvenc_adapter_p = nullptr;
+    adapter_t nvenc_adapter;  // Smart pointer to manage adapter lifetime if we find a different one
+    
+    // Check if current adapter is NVIDIA
+    DXGI_ADAPTER_DESC adapter_desc;
+    adapter->GetDesc(&adapter_desc);
+    
+    if (adapter_desc.VendorId == 0x10de) {  // NVIDIA
+      // Current adapter is already NVIDIA, use it
+      nvenc_adapter_p = adapter.get();
+    }
+    else {
+      // Current adapter is not NVIDIA (likely integrated graphics),
+      // find the NVIDIA adapter for encoding
+      factory1_t factory;
+      HRESULT status = CreateDXGIFactory1(IID_IDXGIFactory1, (void **) &factory);
+      if (SUCCEEDED(status)) {
+        adapter_t::pointer adapter_p;
+        for (int x = 0; factory->EnumAdapters1(x, &adapter_p) != DXGI_ERROR_NOT_FOUND; ++x) {
+          dxgi::adapter_t adapter_tmp { adapter_p };
+          DXGI_ADAPTER_DESC1 adapter_desc1;
+          adapter_tmp->GetDesc1(&adapter_desc1);
+          
+          if (adapter_desc1.VendorId == 0x10de) {  // NVIDIA
+            // Found NVIDIA adapter, use it
+            nvenc_adapter = std::move(adapter_tmp);
+            nvenc_adapter_p = nvenc_adapter.get();
+            BOOST_LOG(info) << "Found NVIDIA GPU for NVENC encoding: " << platf::to_utf8(adapter_desc1.Description)
+                            << " (display capture uses: " << platf::to_utf8(adapter_desc.Description) << ")";
+            break;
+          }
+        }
+      }
+      
+      if (!nvenc_adapter_p) {
+        BOOST_LOG(error) << "Failed to find NVIDIA GPU adapter for NVENC encoding. "
+                         << "Current adapter (VendorId: 0x" << util::hex(adapter_desc.VendorId).to_string_view()
+                         << ") does not support NVENC.";
+        return nullptr;
+      }
+    }
+    
     auto device = std::make_unique<d3d_nvenc_encode_device_t>();
-    if (!device->init_device(shared_from_this(), adapter.get(), pix_fmt)) {
+    if (!device->init_device(shared_from_this(), nvenc_adapter_p, pix_fmt)) {
       return nullptr;
     }
+    
     return device;
   }
 
@@ -2109,10 +2328,17 @@ namespace platf::dxgi {
     compile_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_linear);
     compile_pixel_shader_helper(convert_yuv420_packed_uv_type0s_ps_perceptual_quantizer);
     compile_vertex_shader_helper(convert_yuv420_packed_uv_type0s_vs);
+    compile_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps);
+    compile_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_linear);
+    compile_pixel_shader_helper(convert_yuv420_packed_uv_bicubic_ps_perceptual_quantizer);
+    compile_vertex_shader_helper(convert_yuv420_packed_uv_bicubic_vs);
     compile_pixel_shader_helper(convert_yuv420_planar_y_ps);
     compile_pixel_shader_helper(convert_yuv420_planar_y_ps_linear);
     compile_pixel_shader_helper(convert_yuv420_planar_y_ps_perceptual_quantizer);
     compile_vertex_shader_helper(convert_yuv420_planar_y_vs);
+    compile_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps);
+    compile_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_linear);
+    compile_pixel_shader_helper(convert_yuv420_planar_y_bicubic_ps_perceptual_quantizer);
     compile_pixel_shader_helper(convert_yuv444_packed_ayuv_ps);
     compile_pixel_shader_helper(convert_yuv444_packed_ayuv_ps_linear);
     compile_vertex_shader_helper(convert_yuv444_packed_vs);

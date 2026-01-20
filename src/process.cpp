@@ -28,6 +28,7 @@
 #include "httpcommon.h"
 #include "logging.h"
 #include "platform/common.h"
+#include "platform/run_command.h"
 #include "system_tray.h"
 #include "utility.h"
 
@@ -168,6 +169,11 @@ namespace proc {
     _app_prep_it = _app_prep_begin;
 
     // Add Stream-specific environment variables
+    // These variables are dynamically set for each streaming session and will be passed
+    // to the launched application. They should be preserved during refresh() if an app is running.
+    // Note: Some variables like SUNSHINE_CLIENT_ID, SUNSHINE_CLIENT_UNIQUE_ID, SUNSHINE_CLIENT_USE_VDD,
+    // and SUNSHINE_CLIENT_CERT_UUID are set in launch_session->env (in nvhttp.cpp) but not here,
+    // as they are used for different purposes (e.g., display device session management).
     _env["SUNSHINE_APP_ID"] = std::to_string(_app_id);
     _env["SUNSHINE_APP_NAME"] = _app.name;
     _env["SUNSHINE_CLIENT_NAME"] = launch_session->client_name;
@@ -178,6 +184,7 @@ namespace proc {
     _env["SUNSHINE_CLIENT_GCMAP"] = std::to_string(launch_session->gcmap);
     _env["SUNSHINE_CLIENT_HOST_AUDIO"] = launch_session->host_audio ? "true" : "false";
     _env["SUNSHINE_CLIENT_ENABLE_SOPS"] = launch_session->enable_sops ? "true" : "false";
+    _env["SUNSHINE_CLIENT_ENABLE_MIC"] = launch_session->enable_mic ? "true" : "false";
     _env["SUNSHINE_CLIENT_CUSTOM_SCREEN_MODE"] = std::to_string(launch_session->custom_screen_mode);
     int channelCount = launch_session->surround_info & (65535);
     switch (channelCount) {
@@ -422,6 +429,14 @@ namespace proc {
       return app.id == std::to_string(app_id);
     });
     return iter == _apps.end() ? std::string() : iter->name;
+  }
+
+  std::string
+  proc_t::get_app_cmd(int app_id) {
+    auto iter = std::find_if(_apps.begin(), _apps.end(), [&app_id](const auto app) {
+      return app.id == std::to_string(app_id);
+    });
+    return iter == _apps.end() ? std::string() : iter->cmd;
   }
 
   std::string
@@ -855,7 +870,36 @@ namespace proc {
     auto proc_opt = proc::parse(file_name);
 
     if (proc_opt) {
-      proc.set_env(proc_opt->get_env());
+      // 如果当前有应用正在运行，需要保留动态环境变量（SUNSHINE_*）
+      // 这些变量是在 execute() 中动态添加的，不应该被配置文件中的环境变量覆盖
+      // 
+      // 环境变量构成说明：
+      // 1. 系统环境变量：从 boost::this_process::environment() 获取（PATH、HOME 等）
+      // 2. 配置文件环境变量：从 apps.json 的 env 节点读取（用户自定义）
+      // 3. SUNSHINE_* 动态变量：在 execute() 时设置（串流会话相关）
+      // 
+      // refresh() 时的行为：
+      // - 系统环境变量和配置文件环境变量会被重新读取（反映最新状态）
+      // - SUNSHINE_* 变量会被保留（确保正在运行的进程正常工作）
+      if (proc.running()) {
+        // 保存当前环境变量中的 SUNSHINE_* 动态变量
+        const boost::process::v1::environment &current_env = proc.get_env();
+        boost::process::v1::environment new_env = proc_opt->get_env();
+        
+        // 将当前环境变量中的 SUNSHINE_* 变量复制到新环境变量中
+        for (const auto &entry : current_env) {
+          const std::string &var_name = entry.get_name();
+          if (var_name.find("SUNSHINE_") == 0) {
+            new_env[var_name] = entry.to_string();
+          }
+        }
+        
+        proc.set_env(std::move(new_env));
+      }
+      else {
+        // 没有应用运行时，可以安全地替换环境变量
+        proc.set_env(proc_opt->get_env());
+      }
       proc.set_apps(proc_opt->get_apps());
     }
   }

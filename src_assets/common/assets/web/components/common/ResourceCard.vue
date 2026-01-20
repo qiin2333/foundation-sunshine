@@ -59,14 +59,14 @@
             <div class="col-md-6 col-lg-4">
               <a
                 class="resource-link resource-link-android"
-                href="https://github.com/qiin2333/moonlight-android/releases/tag/shortcut"
+                href="https://github.com/qiin2333/moonlight-vplus"
                 target="_blank"
               >
                 <div class="resource-icon">
                   <i class="fab fa-android"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">威力加强版</span>
+                  <span class="resource-title">Moonlight-VPLUS</span>
                   <span class="resource-desc">Android 推荐</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
@@ -91,7 +91,7 @@
             <div class="col-md-6 col-lg-4">
               <a
                 class="resource-link resource-link-apple"
-                href="https://apps.apple.com/app/voidlink/id6747717070"
+                href="https://apps.apple.com/cn/app/voidlink/id6747717070"
                 target="_blank"
               >
                 <div class="resource-icon">
@@ -217,29 +217,6 @@
 </template>
 
 <style scoped>
-/* Card Base Styles */
-.resource-section .card {
-  border: none;
-  border-radius: 12px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  backdrop-filter: blur(3px);
-}
-
-.resource-section .card-header {
-  border-radius: 12px 12px 0 0 !important;
-  padding: 1rem 1.25rem;
-}
-
-.resource-section .card-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-.resource-section .card-body {
-  padding: 1.25rem;
-}
-
-/* Resource Group */
 .resource-group {
   padding-bottom: 1rem;
   border-bottom: 1px solid rgba(128, 128, 128, 0.15);

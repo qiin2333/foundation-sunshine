@@ -13,7 +13,7 @@
 
     <!-- 正常首页内容 -->
     <div v-if="!showSetupWizard" id="content" class="container">
-      <div class="page-header mb-4">
+      <div class="page-header mt-2 mb-4">
         <h1 class="page-title">
           {{ $t('index.welcome') }}
         </h1>
@@ -138,5 +138,5 @@ onMounted(async () => {
 </script>
 
 <style>
-@import '../styles/global.css';
+@import '../styles/global.less';
 </style>

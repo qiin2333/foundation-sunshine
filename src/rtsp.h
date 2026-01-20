@@ -6,7 +6,7 @@
 
 #include <atomic>
 
-#include <boost/process.hpp>
+#include <boost/process/v1.hpp>
 
 #include "crypto.h"
 #include "thread_safe.h"
@@ -23,7 +23,7 @@ namespace rtsp_stream {
     std::string av_ping_payload;
     uint32_t control_connect_data;
 
-    boost::process::environment env;
+    boost::process::v1::environment env;
 
     bool host_audio;
     std::string unique_id;
@@ -40,10 +40,20 @@ namespace rtsp_stream {
     bool enable_mic;
     bool use_vdd;
     int custom_screen_mode;
+    float max_nits;
+    float min_nits;
+    float max_full_nits;
 
     std::optional<crypto::cipher::gcm_t> rtsp_cipher;
     std::string rtsp_url_scheme;
     uint32_t rtsp_iv_counter;
+
+    // 跟踪已设置的流类型
+    bool setup_video { false };
+    bool setup_audio { false };
+    bool setup_control { false };
+    bool setup_mic { false };
+    bool control_only { false };
   };
 
   void

@@ -9,12 +9,13 @@
 #include "process.h"
 
 #include <filesystem>
-#include <set>
-#include <ctime>
-#include <cstdio>
-#include <iomanip>
-#include <sstream>
 #include <fstream>
+#include <iomanip>
+#include <map>
+#include <set>
+#include <sstream>
+#include <cstdio>
+#include <ctime>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 
@@ -43,6 +44,7 @@
 #include "network.h"
 #include "nvhttp.h"
 #include "platform/common.h"
+#include "platform/run_command.h"
 #include "rtsp.h"
 #include "src/display_device/display_device.h"
 #include "src/display_device/to_string.h"
@@ -828,7 +830,6 @@ namespace confighttp {
     print_req(request);
 
     std::stringstream ss;
-    std::stringstream configStream;
     ss << request->content.rdbuf();
     pt::ptree outputTree;
     auto g = util::fail_guard([&]() {
@@ -849,25 +850,15 @@ namespace confighttp {
 
       saveVddSettings(resArray, fpsArray, gpu_name);
 
-      // 不需要保存到配置文件的只读字段
-      std::set<std::string> readonlyFields = {
-        "status",           // API响应状态，不是配置项
-        "platform",         // 平台信息，编译时确定，只读
-        "version",          // 版本号，只读
-        "display_devices",  // 显示设备列表，运行时枚举，只读
-        "adapters",         // 适配器列表，运行时枚举，只读
-        "pair_name"         // 配对名称，由系统生成，只读
-      };
-
+      // 将 inputTree 转换为 std::map（保证有序）
+      std::map<std::string, std::string> fullConfig;
       for (const auto &kv : inputTree) {
-        if (readonlyFields.find(kv.first) != readonlyFields.end()) {
-          continue;
-        }
         std::string value = inputTree.get<std::string>(kv.first);
-        if (value.length() == 0 || value.compare("null") == 0) continue;
-        configStream << kv.first << " = " << value << std::endl;
+        fullConfig[kv.first] = value;
       }
-      file_handler::write_file(config::sunshine.config_file.c_str(), configStream.str());
+
+      // 更新配置
+      config::update_full_config(fullConfig);
     }
     catch (std::exception &e) {
       BOOST_LOG(warning) << "SaveConfig: "sv << e.what();
@@ -998,14 +989,15 @@ namespace confighttp {
       std::string name = inputTree.get<std::string>("name");
       bool pin_result = nvhttp::pin(pin, name);
       outputTree.put("status", pin_result);
-      
+
       // Send webhook notification
       webhook::send_event_async(webhook::event_t{
         .type = pin_result ? webhook::event_type_t::CONFIG_PIN_SUCCESS : webhook::event_type_t::CONFIG_PIN_FAILED,
         .alert_type = pin_result ? "config_pair_success" : "config_pair_failed",
         .timestamp = webhook::get_current_timestamp(),
         .client_name = name,
-        .client_ip = "",
+        .client_ip = net::addr_to_normalized_string(request->remote_endpoint().address()),
+        .server_ip = net::addr_to_normalized_string(request->local_endpoint().address()),
         .app_name = "",
         .app_id = 0,
         .session_id = "",
@@ -1016,14 +1008,15 @@ namespace confighttp {
       BOOST_LOG(warning) << "SavePin: "sv << e.what();
       outputTree.put("status", false);
       outputTree.put("error", e.what());
-      
+
       // Send webhook notification for pairing failure
       webhook::send_event_async(webhook::event_t{
         .type = webhook::event_type_t::CONFIG_PIN_FAILED,
         .alert_type = "config_pair_failed",
         .timestamp = webhook::get_current_timestamp(),
         .client_name = "",
-        .client_ip = "",
+        .client_ip = net::addr_to_normalized_string(request->remote_endpoint().address()),
+        .server_ip = net::addr_to_normalized_string(request->local_endpoint().address()),
         .app_name = "",
         .app_id = 0,
         .session_id = "",
@@ -1735,7 +1728,7 @@ namespace confighttp {
     server.resource["^/boxart/.+$"]["GET"] = getBoxArt;
     server.resource["^/assets\\/.+$"]["GET"] = getNodeModules;
     server.config.reuse_address = true;
-    server.config.address = net::af_to_any_address_string(address_family);
+    server.config.address = net::get_bind_address(address_family);
     server.config.port = port_https;
 
     auto accept_and_run = [&](https_server_t *server) {

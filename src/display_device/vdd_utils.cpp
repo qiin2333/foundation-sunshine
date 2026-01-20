@@ -2,22 +2,32 @@
 
 #include "vdd_utils.h"
 
+#include <algorithm>
 #include <boost/filesystem.hpp>
-#include <boost/process.hpp>
+#include <boost/process/v1.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/property_tree/ptree.hpp>
 #include <boost/uuid/name_generator_sha1.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <filesystem>
+#include <future>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "src/confighttp.h"
 #include "src/globals.h"
 #include "src/platform/common.h"
+#include "src/platform/run_command.h"
+#include "src/platform/windows/display_device/windows_utils.h"
 #include "src/rtsp.h"
 #include "src/system_tray.h"
+#include "src/system_tray_i18n.h"
 #include "to_string.h"
+
+namespace pt = boost::property_tree;
 
 namespace display_device {
   namespace vdd_utils {
@@ -45,7 +55,7 @@ namespace display_device {
       static const std::string kDevManPath = (std::filesystem::path(SUNSHINE_ASSETS_DIR).parent_path() / "tools" / "DevManView.exe").string();
       static const std::string kDriverName = "Zako Display Adapter";
 
-      boost::process::environment _env = boost::this_process::environment();
+      boost::process::v1::environment _env = boost::this_process::environment();
       auto working_dir = boost::filesystem::path();
       std::error_code ec;
 
@@ -180,15 +190,51 @@ namespace display_device {
       return "{" + boost::uuids::to_string(boost_uuid) + "}";
     }
 
+    /**
+     * @brief 从客户端配置中获取物理尺寸
+     * @param client_name 客户端名称
+     * @return 物理尺寸结构，如果未找到则返回默认值（0,0）
+     */
+    physical_size_t
+    get_client_physical_size(const std::string &client_name) {
+      if (client_name.empty()) {
+        return {};
+      }
+
+      // 预定义尺寸映射表
+      static const std::unordered_map<std::string, physical_size_t> size_map = {
+        { "small", { 13.3f, 7.5f } },  // 小型设备：约6英寸，16:9比例
+        { "medium", { 34.5f, 19.4f } },  // 中型设备：约15.6英寸，16:9比例
+        { "large", { 70.8f, 39.8f } }  // 大型设备：约32英寸，16:9比例
+      };
+
+      try {
+        pt::ptree clientArray;
+        std::stringstream ss(config::nvhttp.clients);
+        pt::read_json(ss, clientArray);
+
+        for (const auto &client : clientArray) {
+          if (client.second.get<std::string>("name", "") == client_name) {
+            const std::string device_size = client.second.get<std::string>("deviceSize", "medium");
+            auto it = size_map.find(device_size);
+            return (it != size_map.end()) ? it->second : size_map.at("medium");
+          }
+        }
+      }
+      catch (const std::exception &e) {
+        BOOST_LOG(debug) << "获取客户端物理尺寸失败: " << e.what();
+      }
+
+      return {};
+    }
+
     bool
-    create_vdd_monitor(const std::string &client_identifier) {
+    create_vdd_monitor(const std::string &client_identifier, const hdr_brightness_t &hdr_brightness, const physical_size_t &physical_size) {
       std::string response;
       std::wstring command = L"CREATEMONITOR";
 
       // 如果没有提供UUID，使用上一次的UUID
-      std::string identifier_to_use = client_identifier.empty() && !last_used_client_uuid.empty() 
-        ? last_used_client_uuid 
-        : client_identifier;
+      std::string identifier_to_use = client_identifier.empty() && !last_used_client_uuid.empty() ? last_used_client_uuid : client_identifier;
 
       if (identifier_to_use != client_identifier && !identifier_to_use.empty()) {
         BOOST_LOG(info) << "未提供客户端标识符，使用上一次的UUID: " << identifier_to_use;
@@ -197,14 +243,33 @@ namespace display_device {
       // 生成GUID并构建命令
       std::string guid_str = generate_client_guid(identifier_to_use);
       if (!guid_str.empty()) {
-        // 转换为宽字符并添加到命令
-        int size_needed = MultiByteToWideChar(CP_UTF8, 0, guid_str.c_str(), -1, NULL, 0);
-        if (size_needed > 0) {
-          std::vector<wchar_t> guid_wide(size_needed);
-          MultiByteToWideChar(CP_UTF8, 0, guid_str.c_str(), -1, guid_wide.data(), size_needed);
-          command += L" " + std::wstring(guid_wide.data());
+        // 构建完整参数: {GUID}:[max_nits,min_nits,maxFALL][widthCm,heightCm]
+        std::ostringstream param_stream;
+        param_stream << guid_str << ":[" << hdr_brightness.max_nits << "," << hdr_brightness.min_nits << "," << hdr_brightness.max_full_nits << "]";
+
+        // 如果提供了物理尺寸，添加到参数中
+        if (physical_size.width_cm > 0.0f && physical_size.height_cm > 0.0f) {
+          param_stream << "[" << physical_size.width_cm << "," << physical_size.height_cm << "]";
         }
-        BOOST_LOG(info) << "创建虚拟显示器，客户端标识符: " << identifier_to_use << ", GUID: " << guid_str;
+
+        std::string param_str = param_stream.str();
+
+        // 转换为宽字符并添加到命令
+        int size_needed = MultiByteToWideChar(CP_UTF8, 0, param_str.c_str(), -1, NULL, 0);
+        if (size_needed > 0) {
+          std::vector<wchar_t> param_wide(size_needed);
+          MultiByteToWideChar(CP_UTF8, 0, param_str.c_str(), -1, param_wide.data(), size_needed);
+          command += L" " + std::wstring(param_wide.data());
+        }
+
+        std::ostringstream log_stream;
+        log_stream << "创建虚拟显示器，客户端标识符: " << identifier_to_use
+                   << ", GUID: " << guid_str
+                   << ", HDR亮度范围: [" << hdr_brightness.max_nits << ", " << hdr_brightness.min_nits << ", " << hdr_brightness.max_full_nits << "]";
+        if (physical_size.width_cm > 0.0f && physical_size.height_cm > 0.0f) {
+          log_stream << ", 物理尺寸: [" << physical_size.width_cm << "cm, " << physical_size.height_cm << "cm]";
+        }
+        BOOST_LOG(info) << log_stream.str();
       }
 
       // 如果使用了有效的UUID，更新上一次使用的UUID
@@ -227,7 +292,7 @@ namespace display_device {
       }
 
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
-      system_tray::update_tray_vmonitor_checked(1);
+      system_tray::update_vdd_menu();
 #endif
       BOOST_LOG(info) << "创建虚拟显示器完成，响应: " << response;
       return true;
@@ -240,10 +305,16 @@ namespace display_device {
         BOOST_LOG(error) << "销毁虚拟显示器失败";
         return false;
       }
-#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
-      system_tray::update_tray_vmonitor_checked(0);
-#endif
+
       BOOST_LOG(info) << "销毁虚拟显示器完成，响应: " << response;
+
+      // 等待驱动程序完全卸载，避免WUDFHost.exe崩溃
+      // 这是必要的，因为驱动程序卸载是异步的
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
+      system_tray::update_vdd_menu();
+#endif
       return true;
     }
 
@@ -264,10 +335,10 @@ namespace display_device {
 
     bool
     is_display_on() {
-      return !display_device::find_device_by_friendlyname(ZAKO_NAME).empty();
+      return !find_device_by_friendlyname(ZAKO_NAME).empty();
     }
 
-    void
+    bool
     toggle_display_power() {
       auto now = std::chrono::steady_clock::now();
 
@@ -277,53 +348,107 @@ namespace display_device {
                               debounce_interval - (now - last_toggle_time))
                               .count()
                          << "秒";
-        return;
+        return false;
       }
 
       last_toggle_time = now;
 
-      if (!is_display_on()) {
-        if (create_vdd_monitor()) {
-          std::thread([]() {
-            // Windows弹窗确认
-            auto future = std::async(std::launch::async, []() {
-              return MessageBoxW(nullptr,
-                       L"已创建虚拟显示器，是否继续使用？\n\n"
-                       L"如不确认，20秒后将自动关闭显示器",
-                       L"显示器确认",
-                       MB_YESNO | MB_ICONQUESTION) == IDYES;
-            });
+      if (is_display_on()) {
+        destroy_vdd_monitor();
+        return true;
+      }
 
-            // 等待20秒超时
-            if (future.wait_for(std::chrono::seconds(20)) != std::future_status::ready || !future.get()) {
-              BOOST_LOG(info) << "用户未确认或超时，自动销毁虚拟显示器";
-              HWND hwnd = FindWindowW(L"#32770", L"显示器确认");
-              if (hwnd && IsWindow(hwnd)) {
-                // 发送退出命令并等待窗口关闭
-                PostMessage(hwnd, WM_COMMAND, MAKEWPARAM(IDNO, BN_CLICKED), 0);
-                PostMessage(hwnd, WM_CLOSE, 0, 0);
+      // 创建前先确认
+      std::wstring confirm_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_CREATE_TITLE));
+      std::wstring confirm_message = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_CREATE_MSG));
 
-                for (int i = 0; i < 5 && IsWindow(hwnd); ++i) {
-                  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                }
+      if (MessageBoxW(NULL, confirm_message.c_str(), confirm_title.c_str(), MB_OKCANCEL | MB_ICONQUESTION) == IDCANCEL) {
+        BOOST_LOG(info) << system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CANCEL_CREATE_LOG);
+        return false;
+      }
 
-                // 如果窗口还存在，尝试强制关闭
-                if (IsWindow(hwnd)) {
-                  BOOST_LOG(warning) << "无法正常关闭确认窗口，尝试终止窗口进程";
-                  EndDialog(hwnd, IDNO);
-                }
-              }
-              destroy_vdd_monitor();
-            }
-            else {
-              BOOST_LOG(info) << "用户确认保留虚拟显示器";
-            }
-          }).detach();
+      if (!create_vdd_monitor("", vdd_utils::hdr_brightness_t {}, vdd_utils::physical_size_t {})) {
+        return false;
+      }
+
+      // 保存创建虚拟显示器前的物理设备列表
+      // 同时从所有可用设备中查找物理显示器（包括可能被禁用的）
+      std::unordered_set<std::string> physical_devices_before;
+      auto topology_before = get_current_topology();
+      auto all_devices_before = enum_available_devices();
+
+      // 从当前拓扑中获取活动的物理设备
+      for (const auto &group : topology_before) {
+        for (const auto &device_id : group) {
+          if (get_display_friendly_name(device_id) != ZAKO_NAME) {
+            physical_devices_before.insert(device_id);
+          }
         }
       }
-      else {
-        destroy_vdd_monitor();
+
+      // 如果拓扑中没有物理设备，尝试从所有设备中查找（可能被禁用了）
+      if (physical_devices_before.empty()) {
+        for (const auto &[device_id, device_info] : all_devices_before) {
+          if (get_display_friendly_name(device_id) != ZAKO_NAME) {
+            physical_devices_before.insert(device_id);
+            BOOST_LOG(debug) << "从所有设备中找到物理显示器: " << device_id;
+          }
+        }
       }
+
+      // 后台线程确保VDD处于扩展模式，并进行二次确认
+      std::thread([vdd_device_id = find_device_by_friendlyname(ZAKO_NAME), physical_devices_before]() mutable {
+        if (vdd_device_id.empty()) {
+          std::this_thread::sleep_for(std::chrono::seconds(2));
+          vdd_device_id = find_device_by_friendlyname(ZAKO_NAME);
+        }
+
+        if (vdd_device_id.empty()) {
+          BOOST_LOG(warning) << "无法找到基地显示器设备，跳过配置";
+        }
+        else {
+          BOOST_LOG(info) << "找到基地显示器设备: " << vdd_device_id;
+
+          if (ensure_vdd_extended_mode(vdd_device_id, physical_devices_before)) {
+            BOOST_LOG(info) << "已确保基地显示器处于扩展模式";
+          }
+        }
+
+        // 创建后二次确认，20秒超时
+        constexpr auto timeout = std::chrono::seconds(20);
+        std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_TITLE));
+        std::wstring confirm_message = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_MSG));
+
+        auto future = std::async(std::launch::async, [&]() {
+          return MessageBoxW(nullptr, confirm_message.c_str(), dialog_title.c_str(), MB_YESNO | MB_ICONQUESTION) == IDYES;
+        });
+
+        if (future.wait_for(timeout) == std::future_status::ready && future.get()) {
+          BOOST_LOG(info) << "用户确认保留基地显示器";
+          return;
+        }
+
+        BOOST_LOG(info) << "用户未确认或超时，自动销毁基地显示器";
+
+        std::wstring w_dialog_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_TITLE));
+        if (HWND hwnd = FindWindowW(L"#32770", w_dialog_title.c_str()); hwnd && IsWindow(hwnd)) {
+          PostMessage(hwnd, WM_COMMAND, MAKEWPARAM(IDNO, BN_CLICKED), 0);
+          PostMessage(hwnd, WM_CLOSE, 0, 0);
+
+          for (int i = 0; i < 5 && IsWindow(hwnd); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+          }
+
+          if (IsWindow(hwnd)) {
+            BOOST_LOG(warning) << "无法正常关闭确认窗口，尝试终止窗口进程";
+            EndDialog(hwnd, IDNO);
+          }
+        }
+
+        destroy_vdd_monitor();
+      }).detach();
+
+      return true;
     }
 
     VddSettings
@@ -346,7 +471,7 @@ namespace display_device {
       // 检查帧率是否已缓存
       for (const auto &fps : config::nvhttp.fps) {
         fps_stream << fps << ',';
-        if (config.refresh_rate && std::to_string(fps) == to_string(*config.refresh_rate)) {
+        if (config.refresh_rate && fps == to_string(*config.refresh_rate)) {
           is_fps_cached = true;
         }
       }
@@ -357,7 +482,7 @@ namespace display_device {
         if (!is_res_cached) {
           res_stream << to_string(*config.resolution);
         }
-        if (!is_fps_cached) {
+        if (!is_fps_cached && config.refresh_rate) {
           fps_stream << to_string(*config.refresh_rate);
         }
       }
@@ -374,97 +499,87 @@ namespace display_device {
     }
 
     bool
-    ensure_vdd_extended_mode(const std::string &device_id) {
+    ensure_vdd_extended_mode(const std::string &device_id, const std::unordered_set<std::string> &physical_devices_to_preserve) {
       if (device_id.empty()) {
         return false;
       }
 
-      // 获取当前拓扑
       auto current_topology = get_current_topology();
       if (current_topology.empty()) {
         BOOST_LOG(warning) << "无法获取当前显示器拓扑";
         return false;
       }
 
-      // 查找包含目标设备的拓扑组
-      bool is_duplicated = false;
-      std::size_t target_group_index = 0;
-
+      // 查找VDD所在的拓扑组
+      std::size_t vdd_group_index = SIZE_MAX;
       for (std::size_t i = 0; i < current_topology.size(); ++i) {
-        const auto &group = current_topology[i];
-        for (const auto &id : group) {
-          if (id == device_id) {
-            target_group_index = i;
-            // 如果组内有多个设备，说明是复制模式
-            is_duplicated = (group.size() > 1);
-            break;
-          }
+        if (std::find(current_topology[i].begin(), current_topology[i].end(), device_id) != current_topology[i].end()) {
+          vdd_group_index = i;
+          break;
         }
-        if (is_duplicated) break;
       }
 
-      if (!is_duplicated) {
-        BOOST_LOG(debug) << "VDD已经是扩展模式，无需更改";
+      // 检查是否需要切换
+      bool is_duplicated = (vdd_group_index != SIZE_MAX && current_topology[vdd_group_index].size() > 1);
+      bool is_vdd_only = (current_topology.size() == 1 && current_topology[0].size() == 1 && current_topology[0][0] == device_id);
+
+      if (!is_duplicated && !is_vdd_only) {
+        BOOST_LOG(debug) << "VDD已经是扩展模式";
         return false;
       }
 
-      BOOST_LOG(info) << "检测到VDD处于复制模式，正在切换到扩展模式...";
+      BOOST_LOG(info) << "检测到VDD处于" << (is_vdd_only ? "仅启用" : "复制") << "模式，切换到扩展模式";
 
-      // 构建新拓扑：将目标设备从复制组中分离出来
+      // 构建新拓扑：分离VDD，保留其他设备
       active_topology_t new_topology;
+      std::unordered_set<std::string> included;
 
       for (std::size_t i = 0; i < current_topology.size(); ++i) {
         const auto &group = current_topology[i];
 
-        if (i == target_group_index) {
-          // 处理包含目标设备的组
-          std::vector<std::string> other_devices;
+        if (i == vdd_group_index) {
+          // 分离VDD到独立组
           for (const auto &id : group) {
-            if (id != device_id) {
-              other_devices.push_back(id);
-            }
+            new_topology.push_back({ id });
+            included.insert(id);
           }
-
-          // 如果还有其他设备，保留它们作为一个组
-          if (!other_devices.empty()) {
-            new_topology.push_back(other_devices);
-          }
-
-          // 将目标设备作为独立的扩展显示器
-          new_topology.push_back({ device_id });
         }
         else {
-          // 保持其他组不变
+          for (const auto &id : group) {
+            included.insert(id);
+          }
           new_topology.push_back(group);
         }
       }
 
-      // 应用新拓扑
-      if (!is_topology_valid(new_topology)) {
-        BOOST_LOG(error) << "生成的新拓扑无效";
+      // 添加缺失的物理显示器
+      auto all_devices = enum_available_devices();
+      for (const auto &physical_id : physical_devices_to_preserve) {
+        if (included.count(physical_id) == 0 && all_devices.find(physical_id) != all_devices.end()) {
+          new_topology.push_back({ physical_id });
+          BOOST_LOG(info) << "添加物理显示器到拓扑: " << physical_id;
+        }
+      }
+
+      if (!is_topology_valid(new_topology) || !set_topology(new_topology)) {
+        BOOST_LOG(error) << "设置拓扑失败";
         return false;
       }
 
-      if (set_topology(new_topology)) {
-        BOOST_LOG(info) << "成功将VDD切换到扩展模式";
-        return true;
-      }
-      else {
-        BOOST_LOG(error) << "切换VDD到扩展模式失败";
-        return false;
-      }
+      BOOST_LOG(info) << "成功切换到扩展模式";
+      return true;
     }
 
     bool
     set_hdr_state(bool enable_hdr) {
-      auto vdd_device_id = display_device::find_device_by_friendlyname(ZAKO_NAME);
+      auto vdd_device_id = find_device_by_friendlyname(ZAKO_NAME);
       if (vdd_device_id.empty()) {
         BOOST_LOG(debug) << "未找到虚拟显示器设备，跳过HDR状态设置";
         return true;
       }
 
       std::unordered_set<std::string> vdd_device_ids = { vdd_device_id };
-      auto current_hdr_states = display_device::get_current_hdr_states(vdd_device_ids);
+      auto current_hdr_states = get_current_hdr_states(vdd_device_ids);
 
       auto hdr_state_it = current_hdr_states.find(vdd_device_id);
       if (hdr_state_it == current_hdr_states.end()) {
@@ -484,7 +599,7 @@ namespace display_device {
       const std::string action = enable_hdr ? "启用" : "关闭";
       BOOST_LOG(info) << "正在" << action << "虚拟显示器HDR...";
 
-      if (display_device::set_hdr_states(new_hdr_states)) {
+      if (set_hdr_states(new_hdr_states)) {
         BOOST_LOG(info) << "成功" << action << "虚拟显示器HDR";
         return true;
       }

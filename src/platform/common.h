@@ -15,7 +15,7 @@
 #include <boost/core/noncopyable.hpp>
 #ifndef _WIN32
   #include <boost/asio.hpp>
-  #include <boost/process.hpp>
+  #include <boost/process/v1.hpp>
 #endif
 
 // local includes
@@ -47,18 +47,6 @@ namespace boost {
       class address;
     }  // namespace ip
   }  // namespace asio
-
-  namespace filesystem {
-    class path;
-  }
-
-  namespace process::inline v1 {
-    class child;
-    class group;
-    template <typename Char>
-    class basic_environment;
-    typedef basic_environment<char> environment;
-  }  // namespace process::inline v1
 }  // namespace boost
 #endif
 namespace video {
@@ -237,6 +225,7 @@ namespace platf {
     dxgi,  ///< DXGI
     cuda,  ///< CUDA
     videotoolbox,  ///< VideoToolbox
+    vulkan,  ///< Vulkan
     unknown  ///< Unknown
   };
 
@@ -598,10 +587,11 @@ namespace platf {
      * @brief Write microphone data to the virtual audio device.
      * @param data Pointer to the audio data.
      * @param size Size of the audio data in bytes.
+     * @param seq Sequence number for FEC recovery (0 = unknown)
      * @returns Number of bytes written, or -1 on error.
      */
     virtual int
-    write_mic_data(const char *data, size_t size) = 0;
+    write_mic_data(const char *data, size_t size, uint16_t seq = 0) = 0;
 
     /**
      * @brief Initialize the microphone redirect device.
@@ -662,9 +652,6 @@ namespace platf {
    */
   bool
   needs_encoder_reenumeration();
-
-  boost::process::v1::child
-  run_command(bool elevated, bool interactive, const std::string &cmd, boost::filesystem::path &working_dir, const boost::process::v1::environment &env, FILE *file, std::error_code &ec, boost::process::v1::group *group);
 
   enum class thread_priority_e : int {
     low,  ///< Low priority
@@ -802,6 +789,17 @@ namespace platf {
    */
   void
   open_url(const std::string &url);
+
+  /**
+   * @brief Open a url directly in the system default browser.
+   * @details This function opens the URL directly using the system's default browser,
+   *          bypassing any intermediate applications. On Windows, it reads the registry
+   *          to find the default browser and launches it directly to avoid browser
+   *          selection dialogs.
+   * @param url The url to open.
+   */
+  void
+  open_url_in_browser(const std::string &url);
 
   /**
    * @brief Attempt to gracefully terminate a process group.

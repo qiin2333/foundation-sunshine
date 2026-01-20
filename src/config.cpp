@@ -3,6 +3,7 @@
  * @brief Definitions for the configuration of Sunshine.
  */
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -30,6 +31,7 @@
 
 #ifdef _WIN32
   #include <shellapi.h>
+  #include "platform/windows/misc.h"
 #endif
 
 #ifndef __APPLE__
@@ -64,8 +66,41 @@ namespace config {
       if (preset == "disabled") return disabled;
       if (preset == "driver_decides") return driver_decides;
       if (preset == "enabled") return force_enabled;
+      if (preset == "two_strips") return two_strips;
+      if (preset == "three_strips") return three_strips;
+      if (preset == "four_strips") return four_strips;
       BOOST_LOG(warning) << "config: unknown nvenc_split_encode value: " << preset;
       return driver_decides;
+    }
+
+    nvenc::nvenc_lookahead_level
+    lookahead_level_from_view(const std::string_view &level) {
+      using enum nvenc::nvenc_lookahead_level;
+      if (level == "disabled" || level == "0") return disabled;
+      if (level == "1") return level_1;
+      if (level == "2") return level_2;
+      if (level == "3") return level_3;
+      if (level == "autoselect" || level == "auto") return autoselect;
+      BOOST_LOG(warning) << "config: unknown nvenc_lookahead_level value: " << level;
+      return disabled;
+    }
+
+    nvenc::nvenc_temporal_filter_level
+    temporal_filter_level_from_view(const std::string_view &level) {
+      using enum nvenc::nvenc_temporal_filter_level;
+      if (level == "disabled" || level == "0") return disabled;
+      if (level == "4") return level_4;
+      BOOST_LOG(warning) << "config: unknown nvenc_temporal_filter_level value: " << level;
+      return disabled;
+    }
+
+    nvenc::nvenc_rate_control_mode
+    rate_control_mode_from_view(const std::string_view &mode) {
+      using enum nvenc::nvenc_rate_control_mode;
+      if (mode == "cbr") return cbr;
+      if (mode == "vbr") return vbr;
+      BOOST_LOG(warning) << "config: unknown nvenc_rate_control_mode value: " << mode;
+      return cbr;
     }
 
   }  // namespace nv
@@ -358,7 +393,7 @@ namespace config {
     true,  // nv_realtime_hags
     true,  // nv_opengl_vulkan_on_dxgi
     true,  // nv_sunshine_high_power_mode
-    false,  // preferUseVdd
+    false,  // vdd_keep_enabled
     {},  // nv_legacy
 
     {
@@ -398,6 +433,8 @@ namespace config {
     {},  // encoder
     {},  // adapter_name
     {},  // output_name
+    {},  // capture_target (default: empty, will be set to "display" in apply_config)
+    {},  // window_title
     (int) display_device::parsed_config_t::device_prep_e::no_operation,  // display_device_prep
     (int) display_device::parsed_config_t::resolution_change_e::automatic,  // resolution_change
     {},  // manual_resolution
@@ -406,13 +443,15 @@ namespace config {
     (int) display_device::parsed_config_t::hdr_prep_e::automatic,  // hdr_prep
     {},  // display_mode_remapping
     false,  // variable_refresh_rate
-    0  // minimum_fps_target (0 = auto, about half the stream FPS)
+    0,  // minimum_fps_target (0 = auto, about half the stream FPS)
+    "balanced"s,  // downscaling_quality (default: bicubic for best quality/performance balance)
   };
 
   audio_t audio {
     {},  // audio_sink
     {},  // virtual_sink
     true,  // stream audio
+    true,  // stream_mic (enable microphone streaming from client)
     true,  // install_steam_drivers
   };
 
@@ -449,7 +488,7 @@ namespace config {
       "3840x1600"s,
     },  // supported resolutions
 
-    { 60, 90, 120, 144 },  // supported fps
+    { "60", "90", "120", "144" },  // supported fps (支持小数刷新率)
   };
 
   webhook_t webhook {
@@ -501,6 +540,7 @@ namespace config {
     {},  // cmd args
     47989,  // Base port number
     "ipv4",  // Address family
+    {},  // Bind address
     platf::appdata().string() + "/sunshine.log",  // log file
     false,  // restore_log - 默认不恢复日志文件
     false,  // notify_pre_releases
@@ -1029,27 +1069,7 @@ namespace config {
     return opts;
   }
 
-  void
-  sync_idd_f(std::unordered_map<std::string, std::string> &vars, const std::string &name, std::string &input) {
-    if (input == VDD_NAME) {
-      video.preferUseVdd = true;
-    }
-  }
-
-  void
-  apply_config(std::unordered_map<std::string, std::string> &&vars) {
-#ifndef __ANDROID__
-    // TODO: Android can possibly support this
-    if (!fs::exists(stream.file_apps.c_str())) {
-      fs::copy_file(SUNSHINE_ASSETS_DIR "/apps.json", stream.file_apps);
-      fs::permissions(
-        stream.file_apps,
-        fs::perms::owner_read | fs::perms::owner_write,
-        fs::perm_options::add
-      );
-    }
-#endif
-
+  void apply_config(std::unordered_map<std::string, std::string> &&vars) {
     for (auto &[name, val] : vars) {
       BOOST_LOG(info) << "config: '"sv << name << "' = "sv << val;
       modified_config_settings[name] = val;
@@ -1068,9 +1088,15 @@ namespace config {
     int_between_f(vars, "nvenc_preset", video.nv.quality_preset, { 1, 7 });
     int_between_f(vars, "nvenc_vbv_increase", video.nv.vbv_percentage_increase, { 0, 400 });
     bool_f(vars, "nvenc_spatial_aq", video.nv.adaptive_quantization);
+    bool_f(vars, "nvenc_temporal_aq", video.nv.enable_temporal_aq);
     generic_f(vars, "nvenc_twopass", video.nv.two_pass, nv::twopass_from_view);
     bool_f(vars, "nvenc_h264_cavlc", video.nv.h264_cavlc);
     generic_f(vars, "nvenc_split_encode", video.nv.split_frame_encoding, nv::split_encode_from_view);
+    int_between_f(vars, "nvenc_lookahead_depth", video.nv.lookahead_depth, { 0, 32 });
+    generic_f(vars, "nvenc_lookahead_level", video.nv.lookahead_level, nv::lookahead_level_from_view);
+    generic_f(vars, "nvenc_temporal_filter", video.nv.temporal_filter_level, nv::temporal_filter_level_from_view);
+    generic_f(vars, "nvenc_rate_control", video.nv.rate_control_mode, nv::rate_control_mode_from_view);
+    int_between_f(vars, "nvenc_target_quality", video.nv.target_quality, { 0, 63 });
     bool_f(vars, "nvenc_realtime_hags", video.nv_realtime_hags);
     bool_f(vars, "nvenc_opengl_vulkan_on_dxgi", video.nv_opengl_vulkan_on_dxgi);
     bool_f(vars, "nvenc_latency_over_power", video.nv_sunshine_high_power_mode);
@@ -1126,10 +1152,43 @@ namespace config {
     bool_f(vars, "vaapi_strict_rc_buffer", video.vaapi.strict_rc_buffer);
 
     string_f(vars, "capture", video.capture);
+    
+#ifdef _WIN32
+    // Check if WGC is selected and we're running in service mode
+    // If so, automatically switch to DDX since WGC doesn't work in system mode
+    if (!video.capture.empty() && video.capture == "wgc") {
+      if (is_running_as_system_user) {
+        BOOST_LOG(warning) << "WGC capture requires user session mode. Automatically switching to DDX capture."sv;
+        video.capture = "ddx";
+      }
+    }
+#endif
+    
     string_f(vars, "encoder", video.encoder);
     string_f(vars, "adapter_name", video.adapter_name);
     string_f(vars, "output_name", video.output_name);
-    sync_idd_f(vars, "output_name", video.output_name);
+    
+#ifdef _WIN32
+    // Capture target: "display" (default) or "window"
+    string_f(vars, "capture_target", video.capture_target);
+    if (video.capture_target.empty()) {
+      video.capture_target = "display";  // Default to display capture
+    }
+    
+    // Window title for window capture
+    string_f(vars, "window_title", video.window_title);
+    
+    // Validate capture_target
+    if (video.capture_target != "display" && video.capture_target != "window") {
+      BOOST_LOG(warning) << "Invalid capture_target: ["sv << video.capture_target << "], defaulting to 'display'"sv;
+      video.capture_target = "display";
+    }
+    
+    // If window capture is selected, ensure window_title is provided
+    if (video.capture_target == "window" && video.window_title.empty()) {
+      BOOST_LOG(warning) << "capture_target=window but window_title is empty. Window capture may fail."sv;
+    }
+#endif
     int_f(vars, "display_device_prep", video.display_device_prep, display_device::parsed_config_t::device_prep_from_view);
     int_f(vars, "resolution_change", video.resolution_change, display_device::parsed_config_t::resolution_change_from_view);
     string_f(vars, "manual_resolution", video.manual_resolution);
@@ -1140,6 +1199,21 @@ namespace config {
     int_f(vars, "max_bitrate", video.max_bitrate);
     bool_f(vars, "variable_refresh_rate", video.variable_refresh_rate);
     int_between_f(vars, "minimum_fps_target", video.minimum_fps_target, { 0, 1000 });
+    bool_f(vars, "vdd_keep_enabled", video.vdd_keep_enabled);
+    
+    // Downscaling quality: "fast" (bilinear+8pt average), "balanced" (bicubic), "high_quality" (future: lanczos)
+    string_f(vars, "downscaling_quality", video.downscaling_quality);
+    if (video.downscaling_quality.empty()) {
+      video.downscaling_quality = "balanced";  // Default to bicubic
+    }
+    // Validate downscaling_quality
+    if (video.downscaling_quality != "fast" && 
+        video.downscaling_quality != "balanced" && 
+        video.downscaling_quality != "high_quality") {
+      BOOST_LOG(warning) << "Invalid downscaling_quality: ["sv << video.downscaling_quality 
+                         << "], valid options are: fast, balanced, high_quality. Defaulting to 'balanced'"sv;
+      video.downscaling_quality = "balanced";
+    }
 
     path_f(vars, "pkey", nvhttp.pkey);
     path_f(vars, "cert", nvhttp.cert);
@@ -1154,12 +1228,13 @@ namespace config {
 
     string_f(vars, "external_ip", nvhttp.external_ip);
     list_string_f(vars, "resolutions"s, nvhttp.resolutions);
-    list_int_f(vars, "fps"s, nvhttp.fps);
+    list_string_f(vars, "fps"s, nvhttp.fps);
     list_prep_cmd_f(vars, "global_prep_cmd", config::sunshine.prep_cmds);
 
     string_f(vars, "audio_sink", audio.sink);
     string_f(vars, "virtual_sink", audio.virtual_sink);
     bool_f(vars, "stream_audio", audio.stream);
+    bool_f(vars, "stream_mic", audio.stream_mic);
     bool_f(vars, "install_steam_audio_drivers", audio.install_steam_drivers);
 
     string_restricted_f(vars, "origin_web_ui_allowed", nvhttp.origin_web_ui_allowed, { "pc"sv, "lan"sv, "wan"sv });
@@ -1174,7 +1249,19 @@ namespace config {
     int_between_f(vars, "wan_encryption_mode", stream.wan_encryption_mode, { 0, 2 });
 
     path_f(vars, "file_apps", stream.file_apps);
-    int_between_f(vars, "fec_percentage", stream.fec_percentage, { 1, 255 });
+#ifndef __ANDROID__
+    // TODO: Android can possibly support this
+    if (!fs::exists(stream.file_apps.c_str())) {
+      fs::copy_file(SUNSHINE_ASSETS_DIR "/apps.json", stream.file_apps);
+      fs::permissions(
+        stream.file_apps,
+        fs::perms::owner_read | fs::perms::owner_write,
+        fs::perm_options::add
+      );
+    }
+#endif
+
+    int_between_f(vars, "fec_percentage", stream.fec_percentage, {1, 255});
 
     map_int_int_f(vars, "keybindings"s, input.keybindings);
 
@@ -1235,7 +1322,8 @@ namespace config {
     int_between_f(vars, "port"s, port, { 1024 + nvhttp::PORT_HTTPS, 65535 - rtsp_stream::RTSP_SETUP_PORT });
     sunshine.port = (std::uint16_t) port;
 
-    string_restricted_f(vars, "address_family", sunshine.address_family, { "ipv4"sv, "both"sv });
+    string_restricted_f(vars, "address_family", sunshine.address_family, {"ipv4"sv, "both"sv});
+    string_f(vars, "bind_address", sunshine.bind_address);
 
     bool upnp = false;
     bool_f(vars, "upnp"s, upnp);
@@ -1497,5 +1585,142 @@ namespace config {
 #endif
 
     return 0;
+  }
+
+  bool
+  update_config(const std::map<std::string, std::string> &updates) {
+    try {
+      // 读取现有配置文件
+      std::map<std::string, std::string> configMap;
+      try {
+        std::string fileContent = file_handler::read_file(sunshine.config_file.c_str());
+        auto existingConfig = parse_config(fileContent);
+        configMap.insert(existingConfig.begin(), existingConfig.end());
+      }
+      catch (const std::exception &e) {
+        BOOST_LOG(debug) << "Failed to read existing config: " << e.what();
+      }
+
+      // 更新配置项，同时检查是否有变化
+      bool hasChanged = false;
+      for (const auto &[key, value] : updates) {
+        auto it = configMap.find(key);
+        if (value.empty() || value == "null") {
+          // 空值则删除该配置项
+          if (it != configMap.end()) {
+            configMap.erase(it);
+            hasChanged = true;
+          }
+        }
+        else {
+          // 只有值不同时才更新
+          if (it == configMap.end() || it->second != value) {
+            configMap[key] = value;
+            hasChanged = true;
+          }
+        }
+      }
+
+      if (!hasChanged) {
+        BOOST_LOG(info) << "Config unchanged, skip writing";
+        return false;
+      }
+
+      // 按字母顺序写入配置文件
+      std::stringstream configStream;
+      for (const auto &[key, value] : configMap) {
+        if (!value.empty() && value != "null") {
+          configStream << key << " = " << value << std::endl;
+        }
+      }
+
+      file_handler::write_file(sunshine.config_file.c_str(), configStream.str());
+      BOOST_LOG(info) << "Config updated successfully";
+      return true;
+    }
+    catch (const std::exception &e) {
+      BOOST_LOG(warning) << "Failed to update config: " << e.what();
+      return false;
+    }
+  }
+
+  bool
+  update_full_config(const std::map<std::string, std::string> &fullConfig) {
+    try {
+      // 不需要保存到配置文件的只读字段（API响应字段，不是配置项）
+      const std::set<std::string> readonlyFields = {
+        "status",           // API响应状态，不是配置项
+        "platform",         // 平台信息，编译时确定，只读
+        "version",          // 版本号，只读
+        "display_devices",  // 显示设备列表，运行时枚举，只读
+        "adapters",         // 适配器列表，运行时枚举，只读
+        "pair_name",        // 配对名称，由系统生成，只读
+      };
+
+      // 受保护的字段：由系统托盘控制，需要保留本地配置文件中的原有值
+      const std::set<std::string> protectedFields = {
+        "vdd_keep_enabled", // 由系统托盘控制，不通过Web UI修改
+        "tray_locale",      // 由系统托盘控制，不通过Web UI修改
+      };
+
+      // 读取现有配置文件（用于获取受保护字段的值和后续对比）
+      std::map<std::string, std::string> originalMap;
+      try {
+        std::string originalFileContent = file_handler::read_file(sunshine.config_file.c_str());
+        auto existingConfig = parse_config(originalFileContent);
+        originalMap.insert(existingConfig.begin(), existingConfig.end());
+      }
+      catch (const std::exception &e) {
+        BOOST_LOG(debug) << "Failed to read existing config: " << e.what();
+      }
+
+      // 使用 std::map 保证按字母顺序保存
+      std::map<std::string, std::string> resultMap;
+
+      // 收集传入的配置（跳过只读字段和受保护字段）
+      for (const auto &[key, value] : fullConfig) {
+        // 跳过只读字段
+        if (readonlyFields.count(key)) {
+          continue;
+        }
+        // 跳过受保护字段（稍后用本地值覆盖）
+        if (protectedFields.count(key)) {
+          continue;
+        }
+        // 跳过空值和 null
+        if (value.empty() || value == "null") {
+          continue;
+        }
+        resultMap[key] = value;
+      }
+
+      // 添加受保护字段（使用本地配置文件中的原有值）
+      for (const auto &field : protectedFields) {
+        auto it = originalMap.find(field);
+        if (it != originalMap.end() && !it->second.empty() && it->second != "null") {
+          resultMap[field] = it->second;
+        }
+      }
+
+      // 对比新配置与原始配置，相同则跳过写入
+      if (resultMap != originalMap) {
+        // 按字母顺序写入配置文件
+        std::stringstream configStream;
+        for (const auto &[key, value] : resultMap) {
+          configStream << key << " = " << value << std::endl;
+        }
+        file_handler::write_file(sunshine.config_file.c_str(), configStream.str());
+        BOOST_LOG(info) << "Config saved successfully";
+        return true;
+      }
+      else {
+        BOOST_LOG(info) << "Config unchanged, skip writing";
+        return false;
+      }
+    }
+    catch (const std::exception &e) {
+      BOOST_LOG(warning) << "Failed to save config: " << e.what();
+      return false;
+    }
   }
 }  // namespace config

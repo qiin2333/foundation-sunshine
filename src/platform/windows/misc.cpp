@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <set>
 #include <sstream>
+#include <vector>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -40,6 +41,7 @@
 #include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/platform/run_command.h"
 #include "src/utility.h"
 #include <iterator>
 
@@ -93,7 +95,7 @@ namespace {
 
 }  // namespace
 
-namespace bp = boost::process;
+namespace bp = boost::process::v1;
 
 using namespace std::literals;
 namespace platf {
@@ -202,7 +204,14 @@ namespace platf {
 
     if (!SetThreadDesktop(hDesk)) {
       auto err = GetLastError();
-      BOOST_LOG(error) << "Failed to sync desktop to thread [0x"sv << util::hex(err).to_string_view() << ']';
+      // Error 0xAA (ERROR_BUSY) can occur when a virtual display is being created
+      // This is not a critical error, so we just log it as a warning
+      if (err == ERROR_BUSY) {
+        BOOST_LOG(warning) << "Failed to sync desktop to thread [0x"sv << util::hex(err).to_string_view() << "] - desktop is busy, retrying later";
+      }
+      else {
+        BOOST_LOG(error) << "Failed to sync desktop to thread [0x"sv << util::hex(err).to_string_view() << ']';
+      }
     }
 
     CloseDesktop(hDesk);
@@ -687,6 +696,89 @@ namespace platf {
   }
 
   /**
+   * @brief Expand environment variables in a command string using the provided environment.
+   * @details This function manually expands %VAR% syntax using variables from the given
+   *          boost::environment, which may contain Sunshine-specific variables like
+   *          SUNSHINE_CLIENT_WIDTH that are not in the current process environment.
+   * @param cmd The command string potentially containing %VAR% syntax.
+   * @param env The environment to use for variable lookup.
+   * @return The command string with environment variables expanded.
+   */
+  std::string
+  expand_env_vars_in_cmd(const std::string &cmd, const bp::environment &env) {
+    // Quick check: if no '%' character, return as-is
+    if (cmd.find('%') == std::string::npos) {
+      return cmd;
+    }
+
+    std::string result;
+    result.reserve(cmd.size() * 2);  // Reserve extra space for potential expansion
+
+    size_t i = 0;
+    while (i < cmd.size()) {
+      if (cmd[i] == '%') {
+        // Look for the closing '%'
+        size_t end = cmd.find('%', i + 1);
+        if (end != std::string::npos && end > i + 1) {
+          // Extract the variable name
+          std::string var_name = cmd.substr(i + 1, end - i - 1);
+
+          // Handle %% escape (becomes single %)
+          if (var_name.empty()) {
+            result += '%';
+            i = end + 1;
+            continue;
+          }
+
+          // Look up the variable in the provided environment (case-insensitive)
+          bool found = false;
+          for (const auto &entry : env) {
+            if (boost::iequals(entry.get_name(), var_name)) {
+              result += entry.to_string();
+              found = true;
+              break;
+            }
+          }
+
+          if (found) {
+            i = end + 1;
+            continue;
+          }
+
+          // If not found in provided env, try the current process environment
+          // Use GetEnvironmentVariableA for Windows (case-insensitive)
+          char sys_val_buf[32768];
+          DWORD sys_len = GetEnvironmentVariableA(var_name.c_str(), sys_val_buf, sizeof(sys_val_buf));
+          if (sys_len > 0 && sys_len < sizeof(sys_val_buf)) {
+            result += sys_val_buf;
+            i = end + 1;
+            continue;
+          }
+
+          // Variable not found, keep the original %VAR% syntax
+          result += cmd.substr(i, end - i + 1);
+          i = end + 1;
+        }
+        else {
+          // No closing '%', keep the character as-is
+          result += cmd[i];
+          i++;
+        }
+      }
+      else {
+        result += cmd[i];
+        i++;
+      }
+    }
+
+    if (result != cmd) {
+      BOOST_LOG(debug) << "Expanded command: "sv << cmd << " -> "sv << result;
+    }
+
+    return result;
+  }
+
+  /**
    * @brief Escape an argument according to cmd's parsing convention.
    * @param argument An argument already escaped by `escape_argument()`.
    * @return An argument string suitable for use by cmd.exe.
@@ -1014,7 +1106,9 @@ namespace platf {
       // Open the process as the current user account, elevation is handled in the token itself.
       ec = impersonate_current_user(user_token, [&]() {
         std::wstring env_block = create_environment_block(cloned_env);
-        std::wstring wcmd = resolve_command_string(cmd, start_dir, user_token, creation_flags);
+        // Expand environment variables in the command using cloned_env (which contains SUNSHINE_* vars)
+        std::string expanded_cmd = expand_env_vars_in_cmd(cmd, cloned_env);
+        std::wstring wcmd = resolve_command_string(expanded_cmd, start_dir, user_token, creation_flags);
         ret = CreateProcessAsUserW(user_token,
           NULL,
           (LPWSTR) wcmd.c_str(),
@@ -1048,7 +1142,9 @@ namespace platf {
       }
 
       std::wstring env_block = create_environment_block(cloned_env);
-      std::wstring wcmd = resolve_command_string(cmd, start_dir, NULL, creation_flags);
+      // Expand environment variables in the command using cloned_env (which contains SUNSHINE_* vars)
+      std::string expanded_cmd = expand_env_vars_in_cmd(cmd, cloned_env);
+      std::wstring wcmd = resolve_command_string(expanded_cmd, start_dir, NULL, creation_flags);
       ret = CreateProcessW(NULL,
         (LPWSTR) wcmd.c_str(),
         NULL,
@@ -1081,6 +1177,27 @@ namespace platf {
     }
     else {
       BOOST_LOG(debug) << "Opened url ["sv << url << "]"sv;
+      child.detach();
+    }
+  }
+
+  /**
+   * @brief Open a url directly in the system default browser.
+   * @details Uses run_command to let the system handle URL opening directly.
+   * @param url The url to open.
+   */
+  void
+  open_url_in_browser(const std::string &url) {
+    boost::process::v1::environment _env = boost::this_process::environment();
+    auto working_dir = boost::filesystem::path();
+    std::error_code ec;
+
+    auto child = run_command(false, false, url, working_dir, _env, nullptr, ec, nullptr);
+    if (ec) {
+      BOOST_LOG(warning) << "Couldn't open url ["sv << url << "]: System: "sv << ec.message();
+    }
+    else {
+      BOOST_LOG(info) << "Opened url ["sv << url << "]"sv;
       child.detach();
     }
   }
@@ -1905,5 +2022,53 @@ namespace platf {
   std::unique_ptr<high_precision_timer>
   create_high_precision_timer() {
     return std::make_unique<win32_high_precision_timer>();
+  }
+
+  bool
+  fuzzy_match(const std::wstring &text, const std::wstring &pattern) {
+    if (pattern.empty()) {
+      return true;
+    }
+    if (text.empty()) {
+      return false;
+    }
+
+    size_t pattern_idx = 0;
+    for (wchar_t c : text) {
+      if (c == pattern[pattern_idx]) {
+        pattern_idx++;
+        if (pattern_idx >= pattern.length()) {
+          return true;  // All characters found in order
+        }
+      }
+    }
+    return false;  // Not all characters found
+  }
+
+  std::vector<std::wstring>
+  split_words(const std::wstring &text) {
+    std::vector<std::wstring> words;
+    if (text.empty()) {
+      return words;
+    }
+
+    // Use boost::algorithm::split with a predicate that checks for word separators
+    boost::algorithm::split(
+      words,
+      text,
+      [](wchar_t c) {
+        return c == L' ' || c == L'-' || c == L'_' || c == L'.' || c == L':';
+      },
+      boost::algorithm::token_compress_on);  // Merge adjacent separators
+
+    // Remove empty strings
+    words.erase(
+      std::remove_if(
+        words.begin(),
+        words.end(),
+        [](const std::wstring &w) { return w.empty(); }),
+      words.end());
+
+    return words;
   }
 }  // namespace platf

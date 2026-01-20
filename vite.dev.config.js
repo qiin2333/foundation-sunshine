@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { resolve } from 'path'
 import { defineConfig } from 'vite'
-import { ViteEjsPlugin } from 'vite-plugin-ejs'
+import { ViteEjsPlugin } from './vite-plugin-ejs-v7.js'
 import vue from '@vitejs/plugin-vue'
 import mkcert from 'vite-plugin-mkcert'
 
@@ -80,6 +80,12 @@ export default defineConfig({
     host: '0.0.0.0',
     open: true,
     cors: true,
+    // HMR 配置：确保 WebSocket 直接连接到 Vite 服务器，而不是通过代理
+    hmr: {
+      protocol: 'wss',
+      host: 'localhost',
+      port: 3000,
+    },
     proxy: {
       '/steam-api': createProxyLogger('🎮 Steam API', 'https://api.steampowered.com', /^\/steam-api/),
       '/steam-store': createProxyLogger('🛒 Steam Store', 'https://store.steampowered.com', /^\/steam-store/),
@@ -195,19 +201,21 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1000, // 提高警告阈值到1MB
-    rollupOptions: {
+    rolldownOptions: {
       input: htmlPages.reduce((acc, name) => {
         acc[name] = resolve(assetsSrcPath, `${name}.html`)
         return acc
       }, {}),
       output: {
-        manualChunks: {
-          // 将Vue相关库分离到单独的chunk
-          'vue-vendor': ['vue', 'vue-i18n'],
-          // 将Bootstrap和FontAwesome分离
-          'ui-vendor': ['bootstrap', '@fortawesome/fontawesome-free', '@popperjs/core'],
-          // 将其他第三方库分离
-          'utils-vendor': ['marked', 'nanoid', 'vuedraggable'],
+        advancedChunks: {
+          groups: [
+            // 将Vue相关库分离到单独的chunk
+            { name: 'vue-vendor', test: /[\\/]node_modules[\\/](vue|vue-i18n)[\\/]/ },
+            // 将Bootstrap和FontAwesome分离
+            { name: 'ui-vendor', test: /[\\/]node_modules[\\/](bootstrap|@fortawesome|@popperjs)[\\/]/ },
+            // 将其他第三方库分离
+            { name: 'utils-vendor', test: /[\\/]node_modules[\\/](marked|nanoid|vuedraggable)[\\/]/ },
+          ],
         },
         // 优化chunk命名
         chunkFileNames: (chunkInfo) => {

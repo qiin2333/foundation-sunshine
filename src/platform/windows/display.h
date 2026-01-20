@@ -4,6 +4,9 @@
  */
 #pragma once
 
+#include <chrono>
+#include <optional>
+
 #include <d3d11.h>
 #include <d3d11_4.h>
 #include <d3dcommon.h>
@@ -185,7 +188,8 @@ namespace platf::dxgi {
     int width_before_rotation;
     int height_before_rotation;
 
-    int client_frame_rate;
+    int client_frame_rate;  // Integer framerate for backward compatibility
+    DXGI_RATIONAL client_frame_rate_rational;  // Fractional framerate for NTSC support (e.g., 60000/1001 = 59.94fps)
     int adapter_index;
     int output_index;
 
@@ -253,6 +257,12 @@ namespace platf::dxgi {
     colorspace_to_string(DXGI_COLOR_SPACE_TYPE type);
     virtual std::vector<DXGI_FORMAT>
     get_supported_capture_formats() = 0;
+
+  private:
+    // Cached HDR metadata for change detection
+    std::optional<SS_HDR_METADATA> cached_hdr_metadata;
+    std::chrono::steady_clock::time_point last_hdr_check_time;
+    static constexpr std::chrono::milliseconds hdr_check_interval { 1000 };  // Check every 1 second
 
   protected:
     int
@@ -366,6 +376,8 @@ namespace platf::dxgi {
 
     duplication_t dup;
     sampler_state_t sampler_linear;
+    // Point sampler for high-quality resampling shaders (avoid double-filtering).
+    sampler_state_t sampler_point;
 
     blend_t blend_alpha;
     blend_t blend_invert;
@@ -393,11 +405,14 @@ namespace platf::dxgi {
     winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame produced_frame { nullptr }, consumed_frame { nullptr };
     SRWLOCK frame_lock = SRWLOCK_INIT;
     CONDITION_VARIABLE frame_present_cv;
-
     void
     on_frame_arrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const &sender, winrt::Windows::Foundation::IInspectable const &);
 
   public:
+    HWND captured_window_hwnd { nullptr };  // Store window handle if capturing a window
+    std::string desired_window_title;  // Store desired window title (for logging/debugging)
+    int window_capture_width { 0 };  // Actual window capture width (may differ from display width)
+    int window_capture_height { 0 };  // Actual window capture height (may differ from display height)
     wgc_capture_t();
     ~wgc_capture_t();
 
@@ -409,6 +424,13 @@ namespace platf::dxgi {
     release_frame();
     int
     set_cursor_visible(bool);
+    
+    /**
+     * @brief Check if the captured window is still valid.
+     * @return true if window is valid or not capturing a window, false if window is invalid.
+     */
+    bool
+    is_window_valid() const;
   };
 
   /**
@@ -420,6 +442,8 @@ namespace platf::dxgi {
   public:
     int
     init(const ::video::config_t &config, const std::string &display_name);
+    std::shared_ptr<img_t>
+    alloc_img() override;
     capture_e
     snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) override;
     capture_e
@@ -435,6 +459,8 @@ namespace platf::dxgi {
   public:
     int
     init(const ::video::config_t &config, const std::string &display_name);
+    std::shared_ptr<img_t>
+    alloc_img() override;
     capture_e
     snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) override;
     capture_e

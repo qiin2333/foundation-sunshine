@@ -1,366 +1,277 @@
 <template>
-  <div
-    class="modal fade"
-    id="editAppModal"
-    tabindex="-1"
-    aria-labelledby="editAppModalLabel"
-    aria-hidden="true"
-    ref="modalElement"
-  >
+  <div class="modal fade" id="editAppModal" tabindex="-1" aria-labelledby="editAppModalLabel" ref="modalElement">
     <div class="modal-dialog modal-xl">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title" id="editAppModalLabel">
             <i class="fas fa-edit me-2"></i>
-            {{ isNewApp ? '添加新应用' : '编辑应用' }}
+            {{ isNewApp ? t('apps.add_new') : t('apps.edit') }}
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <!-- 隐藏的文件选择输入 -->
           <input type="file" ref="fileInput" style="display: none" />
           <input type="file" ref="dirInput" style="display: none" webkitdirectory />
 
-          <form @submit.prevent="saveApp" v-if="formData">
-            <!-- 基础信息手风琴 -->
+          <form v-if="formData" @submit.prevent="saveApp">
             <div class="accordion" id="appFormAccordion">
-              <!-- 基本信息 -->
-              <div class="accordion-item">
-                <h2 class="accordion-header" id="basicInfoHeading">
-                  <button
-                    class="accordion-button"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#basicInfoCollapse"
-                    aria-expanded="true"
-                    aria-controls="basicInfoCollapse"
-                  >
-                    <i class="fas fa-info-circle me-2"></i>基本信息
-                  </button>
-                </h2>
-                <div
-                  id="basicInfoCollapse"
-                  class="accordion-collapse collapse show"
-                  aria-labelledby="basicInfoHeading"
-                  data-bs-parent="#appFormAccordion"
+              <AccordionItem
+                id="basicInfo"
+                icon="fa-info-circle"
+                :title="t('apps.basic_info')"
+                parent-id="appFormAccordion"
+                :show="true"
+              >
+                <FormField
+                  id="appName"
+                  :label="t('apps.app_name')"
+                  :hint="t('apps.app_name_desc')"
+                  :validation="validation.name"
+                  :value="formData.name"
+                  required
                 >
-                  <div class="accordion-body">
-                    <!-- 应用名称 -->
-                    <div class="form-group-enhanced">
-                      <label for="appName" class="form-label-enhanced required-field">{{ $t('apps.app_name') }}</label>
-                      <input
-                        type="text"
-                        class="form-control form-control-enhanced"
-                        id="appName"
-                        v-model="formData.name"
-                        :class="getFieldClass('name')"
-                        @blur="validateField('name')"
-                        required
-                      />
-                      <div v-if="validation.name && !validation.name.isValid" class="invalid-feedback">
-                        {{ validation.name.message }}
-                      </div>
-                      <div v-if="validation.name && validation.name.isValid && formData.name" class="valid-feedback">
-                        应用名称有效
-                      </div>
-                      <div class="field-hint">{{ $t('apps.app_name_desc') }}</div>
-                    </div>
+                  <input
+                    type="text"
+                    class="form-control form-control-enhanced"
+                    id="appName"
+                    v-model="formData.name"
+                    :class="getFieldClass('name')"
+                    @blur="validateField('name')"
+                    required
+                  />
+                </FormField>
 
-                    <!-- 输出名称 -->
-                    <div class="form-group-enhanced">
-                      <label for="appOutput" class="form-label-enhanced">{{ $t('apps.output_name') }}</label>
+                <FormField
+                  id="appOutput"
+                  :label="t('apps.output_name')"
+                  :hint="t('apps.output_desc')"
+                  :validation="validation.output"
+                >
+                  <input
+                    type="text"
+                    class="form-control form-control-enhanced monospace"
+                    id="appOutput"
+                    v-model="formData.output"
+                    :class="getFieldClass('output')"
+                    @blur="validateField('output')"
+                  />
+                </FormField>
+
+                <FormField
+                  id="appCmd"
+                  :label="t('apps.cmd')"
+                  :validation="validation.cmd"
+                  :value="formData.cmd"
+                >
+                  <template #default>
+                    <div class="input-group">
                       <input
                         type="text"
                         class="form-control form-control-enhanced monospace"
-                        id="appOutput"
-                        v-model="formData.output"
-                        :class="getFieldClass('output')"
-                        @blur="validateField('output')"
+                        id="appCmd"
+                        v-model="formData.cmd"
+                        :class="getFieldClass('cmd')"
+                        @blur="validateField('cmd')"
+                        @input="handleCmdInput"
+                        :placeholder="getPlaceholderText('cmd')"
                       />
-                      <div v-if="validation.output && !validation.output.isValid" class="invalid-feedback">
-                        {{ validation.output.message }}
-                      </div>
-                      <div class="field-hint">{{ $t('apps.output_desc') }}</div>
-                    </div>
-
-                    <!-- 主命令 -->
-                    <div class="form-group-enhanced">
-                      <label for="appCmd" class="form-label-enhanced required-field">{{ $t('apps.cmd') }}</label>
-                      <div class="input-group">
-                        <input
-                          type="text"
-                          class="form-control form-control-enhanced monospace"
-                          id="appCmd"
-                          v-model="formData.cmd"
-                          :class="getFieldClass('cmd')"
-                          @blur="validateField('cmd')"
-                          :placeholder="getPlaceholderText('cmd')"
-                        />
-                        <button
-                          class="btn btn-outline-secondary"
-                          type="button"
-                          @click="selectFile('cmd')"
-                          :title="getButtonTitle('file')"
-                        >
-                          <i class="fas fa-folder-open"></i>
-                        </button>
-                      </div>
-                      <div v-if="validation.cmd && !validation.cmd.isValid" class="invalid-feedback">
-                        {{ validation.cmd.message }}
-                      </div>
-                      <div v-if="validation.cmd && validation.cmd.isValid && formData.cmd" class="valid-feedback">
-                        命令有效
-                      </div>
-                      <div class="field-hint">
-                        {{ $t('apps.cmd_desc') }}<br />
-                        <strong>{{ $t('_common.note') }}</strong> {{ $t('apps.cmd_note') }}
-                      </div>
-                    </div>
-
-                    <!-- 工作目录 -->
-                    <div class="form-group-enhanced">
-                      <label for="appWorkingDir" class="form-label-enhanced">{{ $t('apps.working_dir') }}</label>
-                      <div class="input-group">
-                        <input
-                          type="text"
-                          class="form-control form-control-enhanced monospace"
-                          id="appWorkingDir"
-                          v-model="formData['working-dir']"
-                          :class="getFieldClass('working-dir')"
-                          @blur="validateField('working-dir')"
-                          :placeholder="getPlaceholderText('working-dir')"
-                        />
-                        <button
-                          class="btn btn-outline-secondary"
-                          type="button"
-                          @click="selectDirectory('working-dir')"
-                          :title="getButtonTitle('directory')"
-                        >
-                          <i class="fas fa-folder-open"></i>
-                        </button>
-                      </div>
-                      <div
-                        v-if="validation['working-dir'] && !validation['working-dir'].isValid"
-                        class="invalid-feedback"
+                      <button
+                        class="btn btn-outline-secondary"
+                        type="button"
+                        @click="selectFile('cmd')"
+                        :title="getButtonTitle('file')"
                       >
-                        {{ validation['working-dir'].message }}
-                      </div>
-                      <div class="field-hint">{{ $t('apps.working_dir_desc') }}</div>
+                        <i class="fas fa-folder-open"></i>
+                      </button>
                     </div>
-                  </div>
-                </div>
-              </div>
+                  </template>
+                  <template #hint>
+                    {{ t('apps.cmd_desc') }}<br />
+                    <strong>{{ t('_common.note') }}</strong> {{ t('apps.cmd_note') }}<br />
+                    <div class="cmd-examples">
+                      <div class="cmd-examples-header"><i class="fas fa-lightbulb me-1"></i>{{ t('apps.cmd_examples_title') }}</div>
+                      <div class="cmd-examples-tags">
+                        <span class="cmd-tag">
+                          <code>cmd /c "start xbox:"</code>
+                          <span class="cmd-tag-desc">Xbox Game</span>
+                        </span>
+                        <span class="cmd-tag">
+                          <code>steam://open/bigpicture</code>
+                          <span class="cmd-tag-desc">Steam Big Picture</span>
+                        </span>
+                        <span class="cmd-tag">
+                          <code>cmd /c "start ms-gamebar:"</code>
+                          <span class="cmd-tag-desc">Xbox Game Bar</span>
+                        </span>
+                        <span class="cmd-tag">
+                          <code>cmd /c "start playnite://playnite/showMainWindow"</code>
+                          <span class="cmd-tag-desc">Playnite</span>
+                        </span>
+                        <span class="cmd-tag">
+                          <code>"C:\Program Files\...\game.exe"</code>
+                          <span class="cmd-tag-desc">Start program directly</span>
+                        </span>
+                      </div>
+                    </div>
+                  </template>
+                </FormField>
 
-              <!-- 命令设置 -->
-              <div class="accordion-item">
-                <h2 class="accordion-header" id="commandsHeading">
-                  <button
-                    class="accordion-button collapsed"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#commandsCollapse"
-                    aria-expanded="false"
-                    aria-controls="commandsCollapse"
-                  >
-                    <i class="fas fa-terminal me-2"></i>命令设置
-                  </button>
-                </h2>
-                <div
-                  id="commandsCollapse"
-                  class="accordion-collapse collapse"
-                  aria-labelledby="commandsHeading"
-                  data-bs-parent="#appFormAccordion"
+                <FormField
+                  id="appWorkingDir"
+                  :label="t('apps.working_dir')"
+                  :hint="t('apps.working_dir_desc')"
+                  :validation="validation['working-dir']"
                 >
-                  <div class="accordion-body">
-                    <!-- 全局准备命令 -->
-                    <div class="form-group-enhanced">
-                      <div class="form-check form-switch">
-                        <input
-                          type="checkbox"
-                          class="form-check-input"
-                          id="excludeGlobalPrepSwitch"
-                          v-model="formData['exclude-global-prep-cmd']"
-                          :true-value="'true'"
-                          :false-value="'false'"
-                        />
-                        <label class="form-check-label" for="excludeGlobalPrepSwitch">
-                          {{ $t('apps.global_prep_name') }}
-                        </label>
-                      </div>
-                      <div class="field-hint">{{ $t('apps.global_prep_desc') }}</div>
-                    </div>
-
-                    <!-- 准备命令 -->
-                    <CommandTable
-                      :commands="formData['prep-cmd']"
-                      :platform="platform"
-                      type="prep"
-                      @add-command="addPrepCommand"
-                      @remove-command="removePrepCommand"
-                      @order-changed="handlePrepCommandOrderChanged"
+                  <div class="input-group">
+                    <input
+                      type="text"
+                      class="form-control form-control-enhanced monospace"
+                      id="appWorkingDir"
+                      v-model="formData['working-dir']"
+                      :class="getFieldClass('working-dir')"
+                      @blur="validateField('working-dir')"
+                      :placeholder="getPlaceholderText('working-dir')"
                     />
-
-                    <!-- 菜单命令 -->
-                    <CommandTable
-                      :commands="formData['menu-cmd']"
-                      :platform="platform"
-                      type="menu"
-                      @add-command="addMenuCommand"
-                      @remove-command="removeMenuCommand"
-                      @test-command="testMenuCommand"
-                      @order-changed="handleMenuCommandOrderChanged"
-                    />
-
-                    <!-- 独立命令 -->
-                    <DetachedCommands
-                      :commands="formData.detached"
-                      @add-command="addDetachedCommand"
-                      @remove-command="removeDetachedCommand"
-                    />
+                    <button
+                      class="btn btn-outline-secondary"
+                      type="button"
+                      @click="selectDirectory('working-dir')"
+                      :title="getButtonTitle('directory')"
+                    >
+                      <i class="fas fa-folder-open"></i>
+                    </button>
                   </div>
-                </div>
-              </div>
+                </FormField>
+              </AccordionItem>
 
-              <!-- 高级选项 -->
-              <div class="accordion-item">
-                <h2 class="accordion-header" id="advancedHeading">
-                  <button
-                    class="accordion-button collapsed"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#advancedCollapse"
-                    aria-expanded="false"
-                    aria-controls="advancedCollapse"
-                  >
-                    <i class="fas fa-cogs me-2"></i>高级选项
-                  </button>
-                </h2>
-                <div
-                  id="advancedCollapse"
-                  class="accordion-collapse collapse"
-                  aria-labelledby="advancedHeading"
-                  data-bs-parent="#appFormAccordion"
+              <AccordionItem id="commands" icon="fa-terminal" :title="t('apps.command_settings')" parent-id="appFormAccordion">
+                <div class="form-group-enhanced">
+                  <div class="form-check form-switch">
+                    <input
+                      type="checkbox"
+                      class="form-check-input"
+                      id="excludeGlobalPrepSwitch"
+                      v-model="formData['exclude-global-prep-cmd']"
+                      :true-value="'true'"
+                      :false-value="'false'"
+                    />
+                    <label class="form-check-label" for="excludeGlobalPrepSwitch">
+                      {{ t('apps.global_prep_name') }}
+                    </label>
+                  </div>
+                  <div class="field-hint">{{ t('apps.global_prep_desc') }}</div>
+                </div>
+
+                <div class="form-group-enhanced">
+                  <label class="form-label-enhanced">{{ t('apps.cmd_prep_name') }}</label>
+                  <div class="field-hint mb-3">{{ t('apps.cmd_prep_desc') }}</div>
+                  <CommandTable
+                    :commands="formData['prep-cmd']"
+                    :platform="platform"
+                    type="prep"
+                    @add-command="addPrepCommand"
+                    @remove-command="removePrepCommand"
+                    @order-changed="handlePrepCommandOrderChanged"
+                  />
+                </div>
+
+                <div class="form-group-enhanced">
+                  <label class="form-label-enhanced">{{ t('apps.menu_cmd_name') }}</label>
+                  <div class="field-hint mb-3">{{ t('apps.menu_cmd_desc') }}</div>
+                  <CommandTable
+                    :commands="formData['menu-cmd']"
+                    :platform="platform"
+                    type="menu"
+                    @add-command="addMenuCommand"
+                    @remove-command="removeMenuCommand"
+                    @test-command="testMenuCommand"
+                    @order-changed="handleMenuCommandOrderChanged"
+                  />
+                </div>
+
+                <div class="form-group-enhanced">
+                  <label class="form-label-enhanced">{{ t('apps.detached_cmds') }}</label>
+                  <div class="field-hint mb-3">
+                    {{ t('apps.detached_cmds_desc') }}<br>
+                    <strong>{{ t('_common.note') }}</strong> {{ t('apps.detached_cmds_note') }}
+                  </div>
+                  <CommandTable
+                    :commands="formData.detached"
+                    :platform="platform"
+                    type="detached"
+                    @add-command="addDetachedCommand"
+                    @remove-command="removeDetachedCommand"
+                    @order-changed="handleDetachedCommandOrderChanged"
+                  />
+                </div>
+              </AccordionItem>
+
+              <AccordionItem id="advanced" icon="fa-cogs" :title="t('apps.advanced_options')" parent-id="appFormAccordion">
+                <CheckboxField
+                  v-if="isWindows"
+                  id="appElevation"
+                  v-model="formData.elevated"
+                  :label="t('_common.run_as')"
+                  :hint="t('apps.run_as_desc')"
+                />
+
+                <CheckboxField
+                  id="autoDetach"
+                  v-model="formData['auto-detach']"
+                  :label="t('apps.auto_detach')"
+                  :hint="t('apps.auto_detach_desc')"
+                />
+
+                <CheckboxField
+                  id="waitAll"
+                  v-model="formData['wait-all']"
+                  :label="t('apps.wait_all')"
+                  :hint="t('apps.wait_all_desc')"
+                />
+
+                <FormField
+                  id="exitTimeout"
+                  :label="t('apps.exit_timeout')"
+                  :hint="t('apps.exit_timeout_desc')"
+                  :validation="validation['exit-timeout']"
                 >
-                  <div class="accordion-body">
-                    <!-- 权限设置 -->
-                    <div class="form-group-enhanced" v-if="platform === 'windows'">
-                      <div class="form-check">
-                        <input
-                          type="checkbox"
-                          class="form-check-input"
-                          id="appElevation"
-                          v-model="formData.elevated"
-                          true-value="true"
-                          false-value="false"
-                        />
-                        <label for="appElevation" class="form-check-label">{{ $t('_common.run_as') }}</label>
-                      </div>
-                      <div class="field-hint">{{ $t('apps.run_as_desc') }}</div>
-                    </div>
+                  <input
+                    type="number"
+                    class="form-control form-control-enhanced"
+                    id="exitTimeout"
+                    v-model="formData['exit-timeout']"
+                    min="0"
+                    :class="getFieldClass('exit-timeout')"
+                    @blur="validateField('exit-timeout')"
+                  />
+                </FormField>
+              </AccordionItem>
 
-                    <!-- 自动分离 -->
-                    <div class="form-group-enhanced">
-                      <div class="form-check">
-                        <input
-                          type="checkbox"
-                          class="form-check-input"
-                          id="autoDetach"
-                          v-model="formData['auto-detach']"
-                          true-value="true"
-                          false-value="false"
-                        />
-                        <label for="autoDetach" class="form-check-label">{{ $t('apps.auto_detach') }}</label>
-                      </div>
-                      <div class="field-hint">{{ $t('apps.auto_detach_desc') }}</div>
-                    </div>
-
-                    <!-- 等待所有进程 -->
-                    <div class="form-group-enhanced">
-                      <div class="form-check">
-                        <input
-                          type="checkbox"
-                          class="form-check-input"
-                          id="waitAll"
-                          v-model="formData['wait-all']"
-                          true-value="true"
-                          false-value="false"
-                        />
-                        <label for="waitAll" class="form-check-label">{{ $t('apps.wait_all') }}</label>
-                      </div>
-                      <div class="field-hint">{{ $t('apps.wait_all_desc') }}</div>
-                    </div>
-
-                    <!-- 退出超时 -->
-                    <div class="form-group-enhanced">
-                      <label for="exitTimeout" class="form-label-enhanced">{{ $t('apps.exit_timeout') }}</label>
-                      <input
-                        type="number"
-                        class="form-control form-control-enhanced"
-                        id="exitTimeout"
-                        v-model="formData['exit-timeout']"
-                        min="0"
-                        :class="getFieldClass('exit-timeout')"
-                        @blur="validateField('exit-timeout')"
-                      />
-                      <div
-                        v-if="validation['exit-timeout'] && !validation['exit-timeout'].isValid"
-                        class="invalid-feedback"
-                      >
-                        {{ validation['exit-timeout'].message }}
-                      </div>
-                      <div class="field-hint">{{ $t('apps.exit_timeout_desc') }}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 图片设置 -->
-              <div class="accordion-item">
-                <h2 class="accordion-header" id="imageHeading">
-                  <button
-                    class="accordion-button collapsed"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#imageCollapse"
-                    aria-expanded="false"
-                    aria-controls="imageCollapse"
-                  >
-                    <i class="fas fa-image me-2"></i>图片设置
-                  </button>
-                </h2>
-                <div
-                  id="imageCollapse"
-                  class="accordion-collapse collapse"
-                  aria-labelledby="imageHeading"
-                  data-bs-parent="#appFormAccordion"
-                >
-                  <div class="accordion-body">
-                    <ImageSelector
-                      :image-path="formData['image-path']"
-                      :app-name="formData.name"
-                      @update-image="updateImage"
-                      @image-error="handleImageError"
-                    />
-                  </div>
-                </div>
-              </div>
+              <AccordionItem id="image" icon="fa-image" :title="t('apps.image_settings')" parent-id="appFormAccordion">
+                <ImageSelector
+                  :image-path="formData['image-path']"
+                  :app-name="formData.name"
+                  @update-image="updateImage"
+                  @image-error="handleImageError"
+                />
+              </AccordionItem>
             </div>
           </form>
         </div>
         <div class="modal-footer modal-footer-enhanced">
           <div class="save-status">
-            <span v-if="isFormValid" class="text-success"> <i class="fas fa-check-circle me-1"></i>合规应用 </span>
-            <span v-else class="text-warning"> <i class="fas fa-exclamation-triangle me-1"></i>请检查必填字段 </span>
+            <span v-if="isFormValid" class="text-success"> <i class="fas fa-check-circle me-1"></i>{{ t('apps.form_valid') }} </span>
+            <span v-else class="text-warning"> <i class="fas fa-exclamation-triangle me-1"></i>{{ t('apps.form_invalid') }} </span>
             <div v-if="imageError" class="text-danger mt-1">
               <i class="fas fa-exclamation-circle me-1"></i>{{ imageError }}
             </div>
           </div>
           <div>
             <button type="button" class="btn btn-secondary me-2" @click="closeModal">
-              <i class="fas fa-times me-1"></i>{{ $t('_common.cancel') }}
+              <i class="fas fa-times me-1"></i>{{ t('_common.cancel') }}
             </button>
-            <button type="button" class="btn btn-primary" @click="saveApp" :disabled="disabled">
-              <i class="fas fa-save me-1"></i>{{ $t('_common.save') }}
+            <button type="button" class="btn btn-primary" @click="saveApp" :disabled="disabled || !isFormValid">
+              <i class="fas fa-save me-1"></i>{{ t('_common.save') }}
             </button>
           </div>
         </div>
@@ -369,537 +280,483 @@
   </div>
 </template>
 
-<script>
-import { validateField, validateAppForm } from '../utils/validation.js'
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { validateField as validateFieldHelper, validateAppForm } from '../utils/validation.js'
 import { nanoid } from 'nanoid'
 import CommandTable from './CommandTable.vue'
-import DetachedCommands from './DetachedCommands.vue'
 import ImageSelector from './ImageSelector.vue'
+import AccordionItem from './AccordionItem.vue'
+import FormField from './FormField.vue'
+import CheckboxField from './CheckboxField.vue'
 import { createFileSelector } from '../utils/fileSelection.js'
 
-export default {
-  name: 'AppEditor',
-  components: {
-    CommandTable,
-    DetachedCommands,
-    ImageSelector,
-  },
-  props: {
-    app: {
-      type: Object,
-      default: null,
-    },
-    platform: {
-      type: String,
-      default: 'linux',
-    },
-    disabled: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  data() {
-    return {
-      formData: null,
-      validation: {},
-      imageError: '',
-      modalInstance: null,
-      fileSelector: null,
-    }
-  },
-  computed: {
-    isNewApp() {
-      return !this.app || this.app.index === -1
-    },
-    isFormValid() {
-      return this.validation.name?.isValid && this.validation.cmd?.isValid
-    },
-  },
-  watch: {
-    app: {
-      handler(newApp) {
-        if (newApp) {
-          this.initializeForm(newApp)
-          this.$nextTick(() => {
-            this.showModal()
-          })
-        }
-      },
-      immediate: true,
-    },
-  },
-  mounted() {
-    // 延迟初始化模态框实例，确保DOM完全渲染
-    this.$nextTick(() => {
-      this.initializeModal()
-      this.initializeFileSelector()
-    })
-  },
-  beforeUnmount() {
-    // 清理模态框实例
-    if (this.modalInstance) {
-      this.modalInstance.dispose()
-    }
+const DEFAULT_FORM_DATA = Object.freeze({
+  name: '',
+  output: '',
+  cmd: '',
+  index: -1,
+  'exclude-global-prep-cmd': false,
+  elevated: false,
+  'auto-detach': true,
+  'wait-all': true,
+  'exit-timeout': 5,
+  'prep-cmd': [],
+  'menu-cmd': [],
+  detached: [],
+  'image-path': '',
+  'working-dir': '',
+})
 
-    // 清理文件选择器
-    if (this.fileSelector) {
-      this.fileSelector.resetState()
-      this.fileSelector.cleanupFileInputs(this.$refs.fileInput, this.$refs.dirInput)
-    }
+const FIELD_VALIDATION_MAP = Object.freeze({
+  name: 'appName',
+  cmd: 'command',
+  output: 'outputName',
+  'working-dir': 'workingDir',
+  'exit-timeout': 'timeout',
+  'image-path': 'imagePath',
+})
 
-    this.restoreBodyScroll()
-  },
-  methods: {
-    initializeModal() {
-      // 避免重复初始化
-      if (this.modalInstance) {
-        return
-      }
+const props = defineProps({
+  app: { type: Object, default: null },
+  platform: { type: String, default: 'linux' },
+  disabled: { type: Boolean, default: false },
+})
 
-      if (!this.$refs.modalElement) {
-        console.warn('Modal element not found')
-        return
-      }
+const emit = defineEmits(['close', 'save-app'])
 
-      try {
-        // 使用全局的 bootstrap 对象（已在 init.js 中导入并设置到 window.bootstrap）
-        if (!window.bootstrap?.Modal) {
-          console.warn('Bootstrap Modal not available')
-          return
-        }
-        this.modalInstance = new window.bootstrap.Modal(this.$refs.modalElement, {
-          backdrop: 'static',
-          keyboard: false,
-        })
+const { t } = useI18n()
 
-        // 添加模态框隐藏事件监听器，确保页面滚动恢复正常
-        this.$refs.modalElement.addEventListener('hidden.bs.modal', () => {
-          this.restoreBodyScroll()
-        })
+const modalElement = ref(null)
+const fileInput = ref(null)
+const dirInput = ref(null)
+const formData = ref(null)
+const validation = ref({})
+const imageError = ref('')
+const modalInstance = ref(null)
+const fileSelector = ref(null)
 
-        console.log('Modal initialized successfully')
-      } catch (error) {
-        console.warn('Modal initialization failed:', error)
-      }
-    },
+const isWindows = computed(() => props.platform === 'windows')
+const isNewApp = computed(() => !props.app || props.app.index === -1)
+const isFormValid = computed(() => {
+  // name 字段是必填的，必须验证通过
+  const nameValid = validation.value.name?.isValid === true
+  
+  // cmd 字段不是必填的，如果已验证则使用验证结果，如果未验证或为空则认为有效
+  const cmdValid = validation.value.cmd?.isValid !== false  // undefined 或 true 都认为有效
+  
+  return nameValid && cmdValid
+})
 
-    /**
-     * 初始化文件选择器
-     */
-    initializeFileSelector() {
-      this.fileSelector = createFileSelector({
-        platform: this.platform,
-        onSuccess: (message) => {
-          this.showInfoMessage(message)
-        },
-        onError: (error) => {
-          this.showErrorMessage(error)
-        },
-        onInfo: (info) => {
-          this.showInfoMessage(info)
-        },
-      })
-    },
-
-    showModal() {
-      console.log('Attempting to show modal')
-      // 确保模态框已初始化
-      if (!this.modalInstance) {
-        this.initializeModal()
-      }
-
-      if (this.modalInstance) {
-        try {
-          this.modalInstance.show()
-          console.log('Modal shown successfully')
-        } catch (error) {
-          console.error('Failed to show modal:', error)
-        }
-      } else {
-        console.error('Modal instance not available')
-      }
-    },
-
-    /**
-     * 关闭模态框
-     */
-    closeModal() {
-      if (this.modalInstance) {
-        this.modalInstance.hide()
-      }
-      this.resetFileSelection()
-      this.restoreBodyScroll()
-      this.$emit('close')
-    },
-
-    /**
-     * 重置文件选择状态
-     */
-    resetFileSelection() {
-      if (this.fileSelector) {
-        this.fileSelector.resetState()
-        this.fileSelector.cleanupFileInputs(this.$refs.fileInput, this.$refs.dirInput)
-      }
-    },
-
-    restoreBodyScroll() {
-      if (document.body) {
-        document.body.style.overflow = ''
-        document.body.style.paddingRight = ''
-      }
-
-      // 移除所有模态框背景
-      const backdrops = document.querySelectorAll('.modal-backdrop')
-      backdrops.forEach((backdrop) => {
-        backdrop.remove()
-      })
-    },
-
-    showErrorMessage(message) {
-      // 可以用更好的通知组件替换
-      if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast(message, 'error')
-      } else {
-        console.error(message)
-        alert(message)
-      }
-    },
-
-    showInfoMessage(message) {
-      // 可以用更好的通知组件替换
-      if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast(message, 'info')
-      } else {
-        console.info(message)
-      }
-    },
-
-    /**
-     * 初始化表单数据
-     */
-    initializeForm(app) {
-      if (app.index === -1) {
-        // 新应用
-        this.formData = {
-          name: '',
-          output: '',
-          cmd: '',
-          index: -1,
-          'exclude-global-prep-cmd': false,
-          elevated: false,
-          'auto-detach': true,
-          'wait-all': true,
-          'exit-timeout': 5,
-          'prep-cmd': [],
-          'menu-cmd': [],
-          detached: [],
-          'image-path': '',
-          'working-dir': '',
-        }
-      } else {
-        // 编辑现有应用
-        this.formData = JSON.parse(JSON.stringify(app))
-        this.ensureDefaultValues()
-      }
-
-      // 重置验证状态
-      this.validation = {}
-      this.imageError = ''
-    },
-
-    /**
-     * 确保默认值存在
-     */
-    ensureDefaultValues() {
-      if (!this.formData['prep-cmd']) this.formData['prep-cmd'] = []
-      if (!this.formData['menu-cmd']) this.formData['menu-cmd'] = []
-      if (!this.formData['detached']) this.formData['detached'] = []
-      if (!this.formData['exclude-global-prep-cmd']) this.formData['exclude-global-prep-cmd'] = false
-      if (this.formData['elevated'] === undefined && this.platform === 'windows') {
-        this.formData['elevated'] = false
-      }
-      if (this.formData['auto-detach'] === undefined) {
-        this.formData['auto-detach'] = true
-      }
-      if (this.formData['wait-all'] === undefined) {
-        this.formData['wait-all'] = true
-      }
-      if (this.formData['exit-timeout'] === undefined) {
-        this.formData['exit-timeout'] = 5
-      }
-      if (!this.formData['working-dir']) this.formData['working-dir'] = ''
-    },
-
-    /**
-     * 验证单个字段
-     */
-    validateField(fieldName) {
-      const fieldMap = {
-        name: 'appName',
-        cmd: 'command',
-        output: 'outputName',
-        'working-dir': 'workingDir',
-        'exit-timeout': 'timeout',
-        'image-path': 'imagePath',
-      }
-
-      const validationKey = fieldMap[fieldName] || fieldName
-      const result = validateField(validationKey, this.formData[fieldName])
-
-      // Vue 3响应式更新
-      this.validation[fieldName] = result
-
-      return result
-    },
-
-    /**
-     * 获取字段CSS类
-     */
-    getFieldClass(fieldName) {
-      const validation = this.validation[fieldName]
-      if (!validation) return ''
-
-      return {
-        'is-invalid': !validation.isValid,
-        'is-valid': validation.isValid && this.formData[fieldName],
-      }
-    },
-
-    /**
-     * 添加准备命令
-     */
-    addPrepCommand() {
-      const cmd = { do: '', undo: '' }
-      if (this.platform === 'windows') {
-        cmd.elevated = false
-      }
-      this.formData['prep-cmd'].push(cmd)
-    },
-
-    /**
-     * 移除准备命令
-     */
-    removePrepCommand(index) {
-      this.formData['prep-cmd'].splice(index, 1)
-    },
-
-    /**
-     * 添加菜单命令
-     */
-    addMenuCommand() {
-      const cmd = { id: nanoid(10), name: '', cmd: '' }
-      if (this.platform === 'windows') {
-        cmd.elevated = false
-      }
-      this.formData['menu-cmd'].push(cmd)
-    },
-
-    /**
-     * 移除菜单命令
-     */
-    removeMenuCommand(index) {
-      this.formData['menu-cmd'].splice(index, 1)
-    },
-
-    /**
-     * 处理准备命令排序变化
-     */
-    handlePrepCommandOrderChanged(newOrder) {
-      this.formData['prep-cmd'] = newOrder
-    },
-
-    /**
-     * 处理菜单命令排序变化
-     */
-    handleMenuCommandOrderChanged(newOrder) {
-      this.formData['menu-cmd'] = newOrder
-    },
-
-    /**
-     * 测试菜单命令
-     */
-    async testMenuCommand(index) {
-      const menuCmd = this.formData['menu-cmd'][index]
-
-      if (!menuCmd.cmd) {
-        this.showErrorMessage(this.$t('apps.test_menu_cmd_empty'))
-        return
-      }
-
-      try {
-        this.showInfoMessage(this.$t('apps.test_menu_cmd_executing'))
-
-        const response = await fetch('/api/apps/test-menu-cmd', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            cmd: menuCmd.cmd,
-            working_dir: this.formData['working-dir'] || '',
-            elevated: menuCmd.elevated === 'true' || menuCmd.elevated === true,
-          }),
-        })
-
-        const result = await response.json()
-
-        if (result.status) {
-          this.showInfoMessage(this.$t('apps.test_menu_cmd_success'))
-        } else {
-          this.showErrorMessage(this.$t('apps.test_menu_cmd_failed') + ': ' + (result.error || 'Unknown error'))
-        }
-      } catch (error) {
-        console.error('Test menu command error:', error)
-        this.showErrorMessage(this.$t('apps.test_menu_cmd_failed') + ': ' + error.message)
-      }
-    },
-
-    /**
-     * 添加独立命令
-     */
-    addDetachedCommand() {
-      this.formData.detached.push('')
-    },
-
-    /**
-     * 移除独立命令
-     */
-    removeDetachedCommand(index) {
-      this.formData.detached.splice(index, 1)
-    },
-
-    /**
-     * 更新图片路径
-     */
-    updateImage(imagePath) {
-      this.formData['image-path'] = imagePath
-      this.imageError = ''
-    },
-
-    /**
-     * 处理图片错误
-     */
-    handleImageError(error) {
-      this.imageError = error
-    },
-
-    /**
-     * 选择文件
-     */
-    selectFile(fieldName) {
-      if (!this.fileSelector) {
-        this.showErrorMessage('文件选择器未初始化')
-        return
-      }
-
-      this.fileSelector.selectFile(fieldName, this.$refs.fileInput, this.onFilePathSelected)
-    },
-
-    /**
-     * 选择目录
-     */
-    selectDirectory(fieldName) {
-      if (!this.fileSelector) {
-        this.showErrorMessage('文件选择器未初始化')
-        return
-      }
-
-      this.fileSelector.selectDirectory(fieldName, this.$refs.dirInput, this.onFilePathSelected)
-    },
-
-    /**
-     * 文件路径选择完成回调
-     */
-    onFilePathSelected(fieldName, filePath) {
-      this.formData[fieldName] = filePath
-      this.validateField(fieldName)
-    },
-
-    /**
-     * 获取字段占位符文本
-     */
-    getPlaceholderText(fieldName) {
-      return this.fileSelector ? this.fileSelector.getPlaceholderText(fieldName) : ''
-    },
-
-    /**
-     * 获取按钮标题文本
-     */
-    getButtonTitle(type) {
-      return this.fileSelector ? this.fileSelector.getButtonTitle(type) : '选择'
-    },
-
-    /**
-     * 保存应用
-     */
-    async saveApp() {
-      // 验证所有字段
-      const formValidation = validateAppForm(this.formData)
-
-      if (!formValidation.isValid) {
-        // 显示第一个错误
-        if (formValidation.errors.length > 0) {
-          alert(formValidation.errors[0])
-        }
-        return
-      }
-
-      // 处理图片路径
-      const editedApp = {
-        ...this.formData,
-        ...(this.formData['image-path'] && {
-          'image-path': this.formData['image-path'].toString().replace(/"/g, ''),
-        }),
-      }
-
-      this.$emit('save-app', editedApp)
-    },
-  },
+const showMessage = (message, type = 'info') => {
+  if (window.showToast) {
+    window.showToast(message, type)
+  } else if (type === 'error') {
+    alert(message)
+  } else {
+    console.info(message)
+  }
 }
+
+const initializeModal = () => {
+  if (modalInstance.value || !modalElement.value) return
+
+  const Modal = window.bootstrap?.Modal
+  if (!Modal) {
+    console.warn('Bootstrap Modal not available')
+    return
+  }
+
+  try {
+    modalInstance.value = new Modal(modalElement.value, {
+      backdrop: 'static',
+      keyboard: false,
+    })
+  } catch (error) {
+    console.warn('Modal initialization failed:', error)
+  }
+}
+
+const initializeFileSelector = () => {
+  const notify = (type) => (message) => showMessage(message, type)
+  fileSelector.value = createFileSelector({
+    platform: props.platform,
+    onSuccess: notify('info'),
+    onError: notify('error'),
+    onInfo: notify('info'),
+  })
+}
+
+const ensureDefaultValues = () => {
+  const arrayDefaults = ['prep-cmd', 'menu-cmd', 'detached']
+  arrayDefaults.forEach((key) => {
+    if (!formData.value[key]) formData.value[key] = []
+  })
+
+  if (!formData.value['exclude-global-prep-cmd']) {
+    formData.value['exclude-global-prep-cmd'] = false
+  }
+  if (!formData.value['working-dir']) {
+    formData.value['working-dir'] = ''
+  }
+
+  if (isWindows.value && formData.value.elevated === undefined) {
+    formData.value.elevated = false
+  }
+  if (formData.value['auto-detach'] === undefined) {
+    formData.value['auto-detach'] = true
+  }
+  if (formData.value['wait-all'] === undefined) {
+    formData.value['wait-all'] = true
+  }
+  if (formData.value['exit-timeout'] === undefined) {
+    formData.value['exit-timeout'] = 5
+  }
+}
+
+const initializeForm = (app) => {
+  formData.value = { ...DEFAULT_FORM_DATA, ...JSON.parse(JSON.stringify(app)) }
+  ensureDefaultValues()
+  validation.value = {}
+  imageError.value = ''
+  // 立即验证所有字段，确保表单状态正确
+  nextTick(() => {
+    // 验证必填字段 name（总是验证）
+    validateField('name')
+    // 验证 cmd 字段（如果有值则验证，没有值则标记为有效）
+    if (formData.value.cmd && formData.value.cmd.trim()) {
+      validateField('cmd')
+    } else {
+      // cmd 字段不是必填的，如果为空则标记为有效
+      validation.value.cmd = { isValid: true, message: '' }
+    }
+  })
+}
+
+const showModal = () => {
+  if (!modalInstance.value) initializeModal()
+  modalInstance.value?.show()
+}
+
+const resetFileSelection = () => {
+  fileSelector.value?.resetState()
+  fileSelector.value?.cleanupFileInputs(fileInput.value, dirInput.value)
+}
+
+const closeModal = () => {
+  modalInstance.value?.hide()
+  setTimeout(() => {
+    resetFileSelection()
+    emit('close')
+  }, 300)
+}
+
+const cleanup = () => {
+  modalInstance.value?.dispose()
+  resetFileSelection()
+}
+
+const validateField = (fieldName) => {
+  const validationKey = FIELD_VALIDATION_MAP[fieldName] || fieldName
+  const result = validateFieldHelper(validationKey, formData.value[fieldName])
+  validation.value[fieldName] = result
+  return result
+}
+
+// 处理 cmd 字段输入，如果清空则立即更新验证状态
+const handleCmdInput = () => {
+  // 如果 cmd 字段被清空，立即标记为有效（因为不是必填字段）
+  if (!formData.value.cmd || !formData.value.cmd.trim()) {
+    validation.value.cmd = { isValid: true, message: '' }
+  }
+}
+
+const getFieldClass = (fieldName) => {
+  const v = validation.value[fieldName]
+  if (!v) return ''
+  return {
+    'is-invalid': !v.isValid,
+    'is-valid': v.isValid && formData.value[fieldName],
+  }
+}
+
+const createCommand = (type) => {
+  const baseCmd = type === 'prep' ? { do: '', undo: '' } : { id: nanoid(10), name: '', cmd: '' }
+  if (isWindows.value) baseCmd.elevated = false
+  return baseCmd
+}
+
+const addPrepCommand = () => {
+  formData.value['prep-cmd'].push(createCommand('prep'))
+}
+
+const removePrepCommand = (index) => {
+  formData.value['prep-cmd'].splice(index, 1)
+}
+
+const addMenuCommand = () => {
+  formData.value['menu-cmd'].push(createCommand('menu'))
+}
+
+const removeMenuCommand = (index) => {
+  formData.value['menu-cmd'].splice(index, 1)
+}
+
+const handlePrepCommandOrderChanged = (newOrder) => {
+  formData.value['prep-cmd'] = newOrder
+}
+
+const handleMenuCommandOrderChanged = (newOrder) => {
+  formData.value['menu-cmd'] = newOrder
+}
+
+const testMenuCommand = async (index) => {
+  const menuCmd = formData.value['menu-cmd'][index]
+  if (!menuCmd.cmd) {
+    showMessage(t('apps.test_menu_cmd_empty'), 'error')
+    return
+  }
+
+  try {
+    showMessage(t('apps.test_menu_cmd_executing'))
+    const response = await fetch('/api/apps/test-menu-cmd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cmd: menuCmd.cmd,
+        working_dir: formData.value['working-dir'] || '',
+        elevated: menuCmd.elevated === 'true' || menuCmd.elevated === true,
+      }),
+    })
+
+    const result = await response.json()
+    const isSuccess = result.status
+    showMessage(
+      isSuccess
+        ? t('apps.test_menu_cmd_success')
+        : `${t('apps.test_menu_cmd_failed')}: ${result.error || 'Unknown error'}`,
+      isSuccess ? 'info' : 'error'
+    )
+  } catch (error) {
+    showMessage(`${t('apps.test_menu_cmd_failed')}: ${error.message}`, 'error')
+  }
+}
+
+const addDetachedCommand = () => {
+  formData.value.detached.push('')
+}
+
+const removeDetachedCommand = (index) => {
+  formData.value.detached.splice(index, 1)
+}
+
+const handleDetachedCommandOrderChanged = (newOrder) => {
+  formData.value.detached = newOrder
+}
+
+const updateImage = (imagePath) => {
+  formData.value['image-path'] = imagePath
+  imageError.value = ''
+}
+
+const handleImageError = (error) => {
+  imageError.value = error
+}
+
+const onFilePathSelected = (fieldName, filePath) => {
+  formData.value[fieldName] = filePath
+  validateField(fieldName)
+}
+
+const selectFile = (fieldName) => {
+  if (!fileSelector.value) {
+    showMessage(t('apps.file_selector_not_initialized'), 'error')
+    return
+  }
+  fileSelector.value.selectFile(fieldName, fileInput.value, onFilePathSelected)
+}
+
+const selectDirectory = (fieldName) => {
+  if (!fileSelector.value) {
+    showMessage(t('apps.file_selector_not_initialized'), 'error')
+    return
+  }
+  fileSelector.value.selectDirectory(fieldName, dirInput.value, onFilePathSelected)
+}
+
+const getPlaceholderText = (fieldName) => fileSelector.value?.getPlaceholderText(fieldName) || ''
+
+const getButtonTitle = (type) => fileSelector.value?.getButtonTitle(type) || t('apps.select')
+
+const saveApp = async () => {
+  const formValidation = validateAppForm(formData.value)
+  if (!formValidation.isValid) {
+    if (formValidation.errors.length) alert(formValidation.errors[0])
+    return
+  }
+
+  const editedApp = { ...formData.value }
+  if (editedApp['image-path']) {
+    editedApp['image-path'] = editedApp['image-path'].toString().replace(/"/g, '')
+  }
+
+  emit('save-app', editedApp)
+}
+
+watch(
+  () => props.app,
+  (newApp) => {
+    if (newApp) {
+      initializeForm(newApp)
+      nextTick(showModal)
+    }
+  },
+  { immediate: true }
+)
+
+onMounted(() => {
+  nextTick(() => {
+    initializeModal()
+    initializeFileSelector()
+  })
+})
+
+onBeforeUnmount(cleanup)
 </script>
 
-<style scoped>
-.required-field::after {
-  content: ' *';
-  color: #dc3545;
+<style lang="less" scoped>
+.modal-body {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+
+  /* 滚动条美化 */
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.3);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+
+    &:hover {
+      background: rgba(99, 102, 241, 0.5);
+    }
+  }
 }
 
 .modal-footer-enhanced {
-  border-top: 1px solid #dee2e6;
+  border-top: 1px solid rgba(99, 102, 241, 0.2);
   padding: 1rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  
+  [data-bs-theme='light'] & {
+    background: #e0e7ff;
+  }
 }
 
 .save-status {
   font-size: 0.875rem;
-  color: #6c757d;
+  color: #64748b;
 }
 
 .is-invalid {
-  border-color: #dc3545;
+  border-color: #ef4444;
 }
 
 .is-valid {
-  border-color: #198754;
-}
-
-.invalid-feedback {
-  display: block;
-  font-size: 0.875rem;
-  color: #dc3545;
-  margin-top: 0.25rem;
-}
-
-.valid-feedback {
-  display: block;
-  font-size: 0.875rem;
-  color: #198754;
-  margin-top: 0.25rem;
+  border-color: #22c55e;
 }
 
 .monospace {
   font-family: monospace;
+}
+
+.cmd-examples {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  
+  [data-bs-theme='light'] & {
+    background: #e8efff;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+  }
+  
+  [data-bs-theme='dark'] & {
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  &-header {
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    
+    [data-bs-theme='light'] & {
+      color: #6366f1;
+    }
+  }
+
+  &-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    line-height: 1.5;
+  }
+}
+
+.cmd-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+  
+  [data-bs-theme='light'] & {
+    background: #f5f8ff;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.05);
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    
+    [data-bs-theme='light'] & {
+      background: #eef2ff;
+      border-color: rgba(99, 102, 241, 0.3);
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.12);
+    }
+  }
+
+  code {
+    font-family: monospace;
+    font-size: 0.7rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 5px;
+    border: none;
+    
+    [data-bs-theme='light'] & {
+      background: #dce4ff;
+      color: #6366f1;
+    }
+  }
+
+  &-desc {
+    font-size: 0.7rem;
+    white-space: nowrap;
+    
+    [data-bs-theme='light'] & {
+      color: #64748b;
+    }
+  }
 }
 </style>
