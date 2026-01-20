@@ -1,14 +1,17 @@
-//! Sunshine Tray - Rust implementation of the system tray
+//! Sunshine Tray - Rust implementation of the system tray (Windows only)
 //!
 //! This library provides a complete system tray implementation with:
 //! - Multi-language support (Chinese, English, Japanese)
 //! - Menu management
 //! - Notification support
 //! - Icon management
+//!
+//! Note: This crate is Windows-only.
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![cfg(target_os = "windows")]
 
 pub mod i18n;
 pub mod actions;
@@ -19,26 +22,19 @@ pub mod menu_items;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-#[cfg(not(target_os = "windows"))]
-use image::ImageReader;
 use muda::{Menu, MenuEvent};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
-
-use i18n::set_locale_str;
-use actions::{register_callback, ActionCallback};
-
-#[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, PeekMessageW, PostQuitMessage, TranslateMessage, 
     MSG, WM_QUIT, PM_REMOVE, WM_DPICHANGED,
 };
 
-#[cfg(target_os = "windows")]
-use std::sync::atomic::AtomicI32;
+use i18n::set_locale_str;
+use actions::{register_callback, ActionCallback};
 
 /// Tray state - simplified to use menu registry
 #[allow(dead_code)]  // Fields are needed for lifetime management
@@ -57,11 +53,9 @@ static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
 /// Current icon type (0=normal, 1=playing, 2=pausing, 3=locked)
 /// Used to refresh icon when DPI changes
-#[cfg(target_os = "windows")]
 static CURRENT_ICON_TYPE: AtomicI32 = AtomicI32::new(0);
 
 /// Cached DPI value to detect DPI changes
-#[cfg(target_os = "windows")]
 static CACHED_DPI_SIZE: AtomicI32 = AtomicI32::new(0);
 
 /// Config file path storage (set from C++)
@@ -92,7 +86,6 @@ unsafe fn c_str_to_string(ptr: *const c_char) -> Option<String> {
 
 /// Get the system small icon size (used for notification area icons)
 /// This size is DPI-aware and matches what Windows expects for tray icons
-#[cfg(target_os = "windows")]
 fn get_system_small_icon_size() -> (u32, u32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON, SM_CYSMICON};
 
@@ -113,7 +106,6 @@ fn get_system_small_icon_size() -> (u32, u32) {
 
 /// Check if DPI has changed since last icon load
 /// Returns true if DPI changed and icon needs refresh
-#[cfg(target_os = "windows")]
 fn check_dpi_changed() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
 
@@ -131,7 +123,6 @@ fn check_dpi_changed() -> bool {
 }
 
 /// Refresh the current icon with new DPI settings
-#[cfg(target_os = "windows")]
 fn refresh_icon_for_dpi() {
     let icon_type = CURRENT_ICON_TYPE.load(Ordering::SeqCst);
 
@@ -161,7 +152,6 @@ fn refresh_icon_for_dpi() {
 /// Load icon from ICO file path using native Windows API
 /// This properly handles DPI scaling by requesting the correct icon size
 /// based on SM_CXSMICON/SM_CYSMICON system metrics
-#[cfg(target_os = "windows")]
 fn load_icon_from_path(path: &str) -> Option<Icon> {
     // Get the correct icon size for the notification area based on system DPI
     let size = get_system_small_icon_size();
@@ -177,47 +167,14 @@ fn load_icon_from_path(path: &str) -> Option<Icon> {
     }
 }
 
-/// Load icon from file path on non-Windows platforms
-/// On Linux/macOS, ICO files are decoded using the image crate
-#[cfg(not(target_os = "windows"))]
-fn load_icon_from_path(path: &str) -> Option<Icon> {
-    let path = Path::new(path);
-    
-    let img = match ImageReader::open(path) {
-        Ok(reader) => match reader.decode() {
-            Ok(img) => img.into_rgba8(),
-            Err(e) => {
-                eprintln!("Failed to decode icon '{}': {}", path.display(), e);
-                return None;
-            }
-        },
-        Err(e) => {
-            eprintln!("Failed to open icon '{}': {}", path.display(), e);
-            return None;
-        }
-    };
-
-    let (width, height) = img.dimensions();
-    let rgba = img.into_raw();
-
-    Icon::from_rgba(rgba, width, height).ok()
-}
-
-/// Load icon
-///
-/// On Windows: expects .ico file path (supports multi-resolution)
-/// On Linux: can be either a file path or an icon name (searches system dirs)
-/// On macOS: expects file path
+/// Load icon from ICO file path
 fn load_icon(icon_str: &str) -> Option<Icon> {
-    // First, try as a direct file path
     if Path::new(icon_str).exists() {
         return load_icon_from_path(icon_str);
     }
 
-    {
-        eprintln!("Icon not found: {}", icon_str);
-        None
-    }
+    eprintln!("Icon not found: {}", icon_str);
+    None
 }
 
 /// Identify which action corresponds to the menu event
@@ -390,99 +347,42 @@ pub extern "C" fn tray_loop(blocking: c_int) -> c_int {
         return -1;
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        unsafe {
-            let mut msg: MSG = std::mem::zeroed();
-
-            if blocking != 0 {
-                if GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) <= 0 {
-                    return -1;
-                }
-            } else {
-                if PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) == 0 {
-                    return 0;
-                }
-            }
-
-            if msg.message == WM_QUIT {
-                return -1;
-            }
-
-            // Handle DPI change - refresh icon with new size
-            if msg.message == WM_DPICHANGED || check_dpi_changed() {
-                refresh_icon_for_dpi();
-            }
-
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-
-        // Process menu events - use process_menu_event to avoid deadlocks
-        if let Ok(event) = MenuEvent::receiver().try_recv() {
-            process_menu_event(&event);
-        }
-
-        if SHOULD_EXIT.load(Ordering::SeqCst) {
-            return -1;
-        }
-
-        0
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        // GTK event loop
-        while gtk::events_pending() {
-            gtk::main_iteration();
-        }
+    unsafe {
+        let mut msg: MSG = std::mem::zeroed();
 
         if blocking != 0 {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-
-        // Process menu events - use process_menu_event to avoid deadlocks
-        if let Ok(event) = MenuEvent::receiver().try_recv() {
-            process_menu_event(&event);
-        }
-
-        if SHOULD_EXIT.load(Ordering::SeqCst) {
-            return -1;
-        }
-
-        0
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        use objc2::rc::autoreleasepool;
-        use objc2_foundation::{NSDate, NSRunLoop};
-
-        autoreleasepool(|_| {
-            unsafe {
-                let run_loop = NSRunLoop::currentRunLoop();
-                let interval = if blocking != 0 { 0.1 } else { 0.0 };
-                let date = NSDate::dateWithTimeIntervalSinceNow(interval);
-                run_loop.runUntilDate(&date);
+            if GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) <= 0 {
+                return -1;
             }
-        });
-
-        // Process menu events - use process_menu_event to avoid deadlocks
-        if let Ok(event) = MenuEvent::receiver().try_recv() {
-            process_menu_event(&event);
+        } else {
+            if PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) == 0 {
+                return 0;
+            }
         }
 
-        if SHOULD_EXIT.load(Ordering::SeqCst) {
+        if msg.message == WM_QUIT {
             return -1;
         }
 
-        0
+        // Handle DPI change - refresh icon with new size
+        if msg.message == WM_DPICHANGED || check_dpi_changed() {
+            refresh_icon_for_dpi();
+        }
+
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    {
-        -1
+    // Process menu events - use process_menu_event to avoid deadlocks
+    if let Ok(event) = MenuEvent::receiver().try_recv() {
+        process_menu_event(&event);
     }
+
+    if SHOULD_EXIT.load(Ordering::SeqCst) {
+        return -1;
+    }
+
+    0
 }
 
 /// Exit the tray event loop
@@ -490,14 +390,8 @@ pub extern "C" fn tray_loop(blocking: c_int) -> c_int {
 pub extern "C" fn tray_exit() {
     SHOULD_EXIT.store(true, Ordering::SeqCst);
 
-    #[cfg(target_os = "windows")]
     unsafe {
         PostQuitMessage(0);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        gtk::main_quit();
     }
 
     // Clean up state
@@ -513,7 +407,6 @@ pub extern "C" fn tray_exit() {
 #[no_mangle]
 pub extern "C" fn tray_set_icon(icon_type: c_int) {
     // Store current icon type for DPI change refresh
-    #[cfg(target_os = "windows")]
     CURRENT_ICON_TYPE.store(icon_type, Ordering::SeqCst);
 
     let icon_paths = match ICON_PATHS.get() {

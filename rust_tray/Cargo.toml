@@ -3,6 +3,7 @@ name = "sunshine_tray"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
+description = "Windows-only system tray implementation for Sunshine"
 
 [lib]
 name = "tray"
@@ -11,11 +12,11 @@ crate-type = ["staticlib"]
 [dependencies]
 tray-icon = "0.19"
 muda = "0.15"
-image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 once_cell = "1.19"
 parking_lot = "0.12"
 log = "0.4"
 
+# Windows-only dependencies
 [target.'cfg(windows)'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 windows-sys = { version = "0.59", features = [
@@ -24,15 +25,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_UI_Controls_Dialogs",
 ] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-gtk = "0.18"
-glib = "0.20"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.5"
-objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSRunningApplication"] }
-objc2-foundation = { version = "0.2", features = ["NSRunLoop", "NSDate"] }
 
 [build-dependencies]
 # bindgen = "0.71"  # Disabled: requires LLVM/Clang installation

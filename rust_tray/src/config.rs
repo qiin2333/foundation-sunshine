@@ -1,4 +1,4 @@
-//! Configuration file operations module
+//! Configuration file operations module (Windows only)
 //! 
 //! Provides functionality for reading, writing, importing, exporting,
 //! and resetting the Sunshine configuration file.
@@ -7,16 +7,13 @@
 //! which provides the exact path used by the main Sunshine application.
 
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
+use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::i18n::{get_string, StringKey};
 use crate::get_config_file_path_from_cpp;
-
-#[cfg(target_os = "windows")]
-use std::ffi::OsStr;
-#[cfg(target_os = "windows")]
-use std::os::windows::ffi::OsStrExt;
 
 /// Result type for config operations
 pub type ConfigResult<T> = Result<T, ConfigError>;
@@ -48,6 +45,7 @@ impl std::fmt::Display for ConfigError {
 /// Get the Sunshine configuration file path
 /// 
 /// The path is provided by C++ via tray_init_ex, ensuring consistency
+/// with the main Sunshine application's configuration path.
 /// with the main Sunshine application's configuration path.
 pub fn get_config_file_path() -> Option<PathBuf> {
     get_config_file_path_from_cpp()
@@ -120,8 +118,7 @@ pub fn save_config_value(key: &str, value: &str) -> ConfigResult<()> {
     write_config(&vars)
 }
 
-/// Show message box (Windows)
-#[cfg(target_os = "windows")]
+/// Show message box
 pub fn show_message_box(title: &str, message: &str, is_error: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONERROR, MB_ICONINFORMATION};
     
@@ -147,14 +144,7 @@ pub fn show_message_box(title: &str, message: &str, is_error: bool) {
     }
 }
 
-/// Show message box (non-Windows - just log for now)
-#[cfg(not(target_os = "windows"))]
-pub fn show_message_box(title: &str, message: &str, _is_error: bool) {
-    eprintln!("[{}] {}", title, message);
-}
-
-/// Show confirmation dialog (Windows)
-#[cfg(target_os = "windows")]
+/// Show confirmation dialog
 pub fn show_confirm_dialog(title: &str, message: &str) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONQUESTION, IDYES};
     
@@ -179,16 +169,7 @@ pub fn show_confirm_dialog(title: &str, message: &str) -> bool {
     }
 }
 
-/// Show confirmation dialog (non-Windows)
-#[cfg(not(target_os = "windows"))]
-pub fn show_confirm_dialog(title: &str, message: &str) -> bool {
-    eprintln!("[{}] {}", title, message);
-    // On non-Windows, default to yes for now
-    true
-}
-
-/// Open file dialog for importing config (Windows)
-#[cfg(target_os = "windows")]
+/// Open file dialog for importing config
 pub fn open_import_dialog() -> ConfigResult<PathBuf> {
     use windows_sys::Win32::UI::Controls::Dialogs::{
         GetOpenFileNameW, OPENFILENAMEW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST,
@@ -227,8 +208,7 @@ pub fn open_import_dialog() -> ConfigResult<PathBuf> {
     }
 }
 
-/// Open file dialog for exporting config (Windows)
-#[cfg(target_os = "windows")]
+/// Open file dialog for exporting config
 pub fn open_export_dialog() -> ConfigResult<PathBuf> {
     use windows_sys::Win32::UI::Controls::Dialogs::{
         GetSaveFileNameW, OPENFILENAMEW, OFN_EXPLORER, OFN_OVERWRITEPROMPT,
@@ -280,21 +260,6 @@ pub fn open_export_dialog() -> ConfigResult<PathBuf> {
             Err(ConfigError::DialogCancelled)
         }
     }
-}
-
-/// Open file dialog for importing config (non-Windows placeholder)
-#[cfg(not(target_os = "windows"))]
-pub fn open_import_dialog() -> ConfigResult<PathBuf> {
-    // For non-Windows, use a simple approach or external crate
-    eprintln!("File dialog not implemented for this platform");
-    Err(ConfigError::NoUserSession)
-}
-
-/// Open file dialog for exporting config (non-Windows placeholder)
-#[cfg(not(target_os = "windows"))]
-pub fn open_export_dialog() -> ConfigResult<PathBuf> {
-    eprintln!("File dialog not implemented for this platform");
-    Err(ConfigError::NoUserSession)
 }
 
 /// Import configuration from file
