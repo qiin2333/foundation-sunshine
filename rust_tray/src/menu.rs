@@ -264,6 +264,36 @@ fn item_id_to_action(item_id: &str) -> Option<MenuAction> {
     }
 }
 
+// ============================================================================
+// VDD Menu State Update
+// ============================================================================
+
+/// Update VDD menu item states
+/// 
+/// Called from C++ side to update menu item enabled/disabled/checked states.
+/// 
+/// # Parameters
+/// * `can_create` - Whether "Create" item should be enabled
+/// * `can_close` - Whether "Close" item should be enabled
+/// * `is_persistent` - Whether "Keep Enabled" is checked
+/// * `is_active` - Whether VDD is currently active (for checked states)
+pub fn update_vdd_menu_state(can_create: bool, can_close: bool, is_persistent: bool, is_active: bool) {
+    use menu_items::ids;
+    
+    // Update Create item
+    // Checked when VDD is active, enabled based on can_create
+    set_check_state_by_id(ids::VDD_CREATE, is_active);
+    set_item_enabled_by_id(ids::VDD_CREATE, can_create);
+    
+    // Update Close item
+    // Checked when VDD is NOT active, enabled based on can_close
+    set_check_state_by_id(ids::VDD_CLOSE, !is_active);
+    set_item_enabled_by_id(ids::VDD_CLOSE, can_close);
+    
+    // Update Keep Enabled item
+    set_check_state_by_id(ids::VDD_PERSISTENT, is_persistent);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -445,27 +445,32 @@ pub unsafe extern "C" fn tray_set_tooltip(tooltip: *const c_char) {
     }
 }
 
-/// Update the VDD create menu item state
+/// Update VDD menu item states
+/// 
+/// This unified function is called from C++ to update all VDD menu states at once.
+/// The C++ side is responsible for:
+/// - Tracking VDD active state
+/// - Managing 10-second cooldown
+/// - Determining which operations are allowed
+/// 
+/// # Parameters
+/// * `can_create` - 1 if Create item should be enabled, 0 otherwise
+/// * `can_close` - 1 if Close item should be enabled, 0 otherwise  
+/// * `is_persistent` - 1 if Keep Enabled is checked, 0 otherwise
+/// * `is_active` - 1 if VDD is currently active, 0 otherwise
 #[no_mangle]
-pub extern "C" fn tray_set_vdd_create_state(checked: c_int, enabled: c_int) {
-    use menu_items::ids;
-    menu::set_check_state_by_id(ids::VDD_CREATE, checked != 0);
-    menu::set_item_enabled_by_id(ids::VDD_CREATE, enabled != 0);
-}
-
-/// Update the VDD close menu item state
-#[no_mangle]
-pub extern "C" fn tray_set_vdd_close_state(checked: c_int, enabled: c_int) {
-    use menu_items::ids;
-    menu::set_check_state_by_id(ids::VDD_CLOSE, checked != 0);
-    menu::set_item_enabled_by_id(ids::VDD_CLOSE, enabled != 0);
-}
-
-/// Update the VDD persistent menu item state
-#[no_mangle]
-pub extern "C" fn tray_set_vdd_persistent_state(checked: c_int) {
-    use menu_items::ids;
-    menu::set_check_state_by_id(ids::VDD_PERSISTENT, checked != 0);
+pub extern "C" fn tray_update_vdd_menu(
+    can_create: c_int,
+    can_close: c_int,
+    is_persistent: c_int,
+    is_active: c_int,
+) {
+    menu::update_vdd_menu_state(
+        can_create != 0,
+        can_close != 0,
+        is_persistent != 0,
+        is_active != 0,
+    );
 }
 
 /// Set the current locale

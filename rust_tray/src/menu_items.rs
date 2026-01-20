@@ -172,15 +172,18 @@ mod handlers {
     }
 
     pub fn vdd_create() {
-        // Handled by C++ callback
+        // VDD create/close validation is handled by C++ side (cooldown + state check)
+        // C++ will only call into Rust after validation passes
     }
 
     pub fn vdd_close() {
-        // Handled by C++ callback
+        // VDD create/close validation is handled by C++ side (cooldown + state check)
+        // C++ will only call into Rust after validation passes
     }
 
     pub fn vdd_persistent() {
-        // Handled by C++ callback
+        // VDD persistent toggle - C++ handles the confirmation and config save
+        // The Rust side only receives the menu click event
     }
 
     pub fn import_config() {
@@ -235,11 +238,25 @@ mod handlers {
     }
 
     pub fn close_app() {
-        // Handled by C++ callback
+        // Show confirmation dialog before closing app
+        if !config::show_confirm_dialog(
+            get_string(StringKey::CloseAppConfirmTitle),
+            get_string(StringKey::CloseAppConfirmMsg),
+        ) {
+            return;
+        }
+        // C++ will handle the actual close
     }
 
     pub fn reset_display() {
-        // Handled by C++ callback
+        // Show confirmation dialog before resetting display config
+        if !config::show_confirm_dialog(
+            get_string(StringKey::ResetDisplayConfirmTitle),
+            get_string(StringKey::ResetDisplayConfirmMsg),
+        ) {
+            return;
+        }
+        // C++ will handle the actual reset
     }
 
     pub fn lang_chinese() {
@@ -270,11 +287,18 @@ mod handlers {
     }
 
     pub fn restart() {
-        // Handled by C++ callback
+        // Handled by C++ callback directly (no confirmation needed)
     }
 
     pub fn quit() {
-        // Handled by C++ callback
+        // Show confirmation dialog before quitting
+        if !config::show_confirm_dialog(
+            get_string(StringKey::QuitTitle),
+            get_string(StringKey::QuitMessage),
+        ) {
+            return;
+        }
+        // C++ will handle the actual quit
     }
 }
 

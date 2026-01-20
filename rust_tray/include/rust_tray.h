@@ -102,24 +102,20 @@ void tray_set_icon(int icon_type);
 void tray_set_tooltip(const char* tooltip);
 
 /**
- * @brief Update the VDD create menu item state
- * @param checked Non-zero to check (VDD is active), zero to uncheck
- * @param enabled Non-zero to enable, zero to disable
+ * @brief Update VDD menu item states
+ * 
+ * This unified function updates all VDD menu states at once.
+ * The C++ side is responsible for:
+ * - Tracking VDD active state
+ * - Managing 10-second cooldown
+ * - Determining which operations are allowed
+ * 
+ * @param can_create Non-zero if "Create" item should be enabled
+ * @param can_close Non-zero if "Close" item should be enabled
+ * @param is_persistent Non-zero if "Keep Enabled" is checked
+ * @param is_active Non-zero if VDD is currently active (for checked states)
  */
-void tray_set_vdd_create_state(int checked, int enabled);
-
-/**
- * @brief Update the VDD close menu item state
- * @param checked Non-zero to check (VDD is not active), zero to uncheck
- * @param enabled Non-zero to enable, zero to disable
- */
-void tray_set_vdd_close_state(int checked, int enabled);
-
-/**
- * @brief Update the VDD persistent menu item state
- * @param checked Non-zero to check (persistent mode enabled), zero to uncheck
- */
-void tray_set_vdd_persistent_state(int checked);
+void tray_update_vdd_menu(int can_create, int can_close, int is_persistent, int is_active);
 
 /**
  * @brief Set the current locale

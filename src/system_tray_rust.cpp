@@ -56,9 +56,50 @@ namespace system_tray {
 
   static std::atomic<bool> tray_initialized = false;
   static std::atomic<bool> end_tray_called = false;
+  
+  // VDD state management
+  static std::atomic<bool> s_vdd_in_cooldown = false;
 
   // Forward declarations
   static void handle_tray_action(uint32_t action);
+  
+  /**
+   * @brief Check if VDD is active
+   */
+  static bool is_vdd_active() {
+    auto vdd_device_id = display_device::session_t::get().get_vdd_id();
+    return !vdd_device_id.empty();
+  }
+  
+  /**
+   * @brief Update VDD menu state in Rust tray
+   */
+  static void update_vdd_menu_state() {
+    bool vdd_active = is_vdd_active();
+    bool keep_enabled = config::video.vdd_keep_enabled;
+    bool in_cooldown = s_vdd_in_cooldown.load();
+    
+    // Create: enabled when NOT active AND NOT in cooldown
+    int can_create = (!vdd_active && !in_cooldown) ? 1 : 0;
+    // Close: enabled when active AND NOT in cooldown AND NOT keep_enabled
+    int can_close = (vdd_active && !in_cooldown && !keep_enabled) ? 1 : 0;
+    
+    tray_update_vdd_menu(can_create, can_close, keep_enabled ? 1 : 0, vdd_active ? 1 : 0);
+  }
+  
+  /**
+   * @brief Start VDD cooldown (10 seconds)
+   */
+  static void start_vdd_cooldown() {
+    s_vdd_in_cooldown = true;
+    update_vdd_menu_state();
+    
+    std::thread([]() {
+      std::this_thread::sleep_for(10s);
+      s_vdd_in_cooldown = false;
+      update_vdd_menu_state();
+    }).detach();
+  }
 
   /**
    * @brief Handle tray actions from Rust
@@ -70,15 +111,31 @@ namespace system_tray {
         launch_ui();
         break;
 
-      case TRAY_ACTION_TOGGLE_VDD_MONITOR:
-        BOOST_LOG(info) << "Toggling display power from system tray"sv;
-        display_device::session_t::get().toggle_display_power();
-        // Disable toggle for 10 seconds
-        tray_set_vdd_enabled(0);
-        std::thread([]() {
-          std::this_thread::sleep_for(10s);
-          tray_set_vdd_enabled(1);
-        }).detach();
+      case TRAY_ACTION_VDD_CREATE:
+        BOOST_LOG(info) << "Creating VDD from system tray"sv;
+        if (!s_vdd_in_cooldown && !is_vdd_active()) {
+          if (display_device::session_t::get().toggle_display_power()) {
+            start_vdd_cooldown();
+          }
+        }
+        break;
+      
+      case TRAY_ACTION_VDD_CLOSE:
+        BOOST_LOG(info) << "Closing VDD from system tray"sv;
+        if (!s_vdd_in_cooldown && is_vdd_active() && !config::video.vdd_keep_enabled) {
+          display_device::session_t::get().destroy_vdd_monitor();
+          start_vdd_cooldown();
+        }
+        break;
+      
+      case TRAY_ACTION_VDD_PERSISTENT:
+        BOOST_LOG(info) << "Toggling VDD persistent mode"sv;
+        // Toggle the keep_enabled setting
+        config::video.vdd_keep_enabled = !config::video.vdd_keep_enabled;
+        // Save to config file
+        config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
+        // Update menu state
+        update_vdd_menu_state();
         break;
 
       case TRAY_ACTION_IMPORT_CONFIG:
@@ -211,6 +268,9 @@ namespace system_tray {
       return -1;
     }
 
+    // Initialize VDD menu state
+    update_vdd_menu_state();
+
     BOOST_LOG(info) << "Rust tray initialized successfully"sv;
     return 0;
   }
@@ -298,7 +358,8 @@ namespace system_tray {
 
   void update_tray_vmonitor_checked(int checked) {
     if (!tray_initialized) return;
-    tray_set_vdd_checked(checked);
+    // Use the unified VDD menu update function
+    update_vdd_menu_state();
   }
 
   // Stub implementations for compatibility
