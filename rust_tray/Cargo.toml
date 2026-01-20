@@ -25,6 +25,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_UI_Controls_Dialogs",
 ] }
+winrt-notification = "0.5"
 
 [build-dependencies]
 # bindgen = "0.71"  # Disabled: requires LLVM/Clang installation

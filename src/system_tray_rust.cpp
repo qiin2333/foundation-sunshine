@@ -326,6 +326,9 @@ namespace system_tray {
 
     std::string tooltip = "Sunshine - Playing: " + app_name;
     tray_set_tooltip(tooltip.c_str());
+    
+    // Show localized notification
+    tray_show_localized_notification(TRAY_NOTIFICATION_STREAM_STARTED, app_name.c_str());
   }
 
   void update_tray_pausing(std::string app_name) {
@@ -335,6 +338,9 @@ namespace system_tray {
 
     std::string tooltip = "Sunshine - Paused: " + app_name;
     tray_set_tooltip(tooltip.c_str());
+    
+    // Show localized notification
+    tray_show_localized_notification(TRAY_NOTIFICATION_STREAM_PAUSED, app_name.c_str());
   }
 
   void update_tray_stopped(std::string app_name) {
@@ -344,16 +350,18 @@ namespace system_tray {
 
     std::string tooltip = "Sunshine "s + PROJECT_VER;
     tray_set_tooltip(tooltip.c_str());
+    
+    // Show localized notification for application stopped
+    if (!app_name.empty()) {
+      tray_show_localized_notification(TRAY_NOTIFICATION_APP_STOPPED, app_name.c_str());
+    }
   }
 
   void update_tray_require_pin(std::string pin_name) {
     if (!tray_initialized) return;
 
-    tray_show_notification(
-      "Sunshine",
-      ("PIN required for: " + pin_name).c_str(),
-      TRAY_ICON_TYPE_NORMAL
-    );
+    // Show localized pairing request notification
+    tray_show_localized_notification(TRAY_NOTIFICATION_PAIRING_REQUEST, pin_name.c_str());
   }
 
   void update_tray_vmonitor_checked(int checked) {

@@ -124,12 +124,29 @@ void tray_update_vdd_menu(int can_create, int can_close, int is_persistent, int 
 void tray_set_locale(const char* locale);
 
 /**
+ * @brief Notification types for localized notifications
+ */
+typedef enum {
+    TRAY_NOTIFICATION_STREAM_STARTED = 0,
+    TRAY_NOTIFICATION_STREAM_PAUSED = 1,
+    TRAY_NOTIFICATION_APP_STOPPED = 2,
+    TRAY_NOTIFICATION_PAIRING_REQUEST = 3,
+} TrayNotificationType;
+
+/**
  * @brief Show a notification
  * @param title Notification title
  * @param text Notification text
  * @param icon_type Icon type for the notification
  */
 void tray_show_notification(const char* title, const char* text, int icon_type);
+
+/**
+ * @brief Show a localized notification
+ * @param notification_type Type of notification (see TrayNotificationType)
+ * @param app_name Application name for formatting (can be NULL)
+ */
+void tray_show_localized_notification(int notification_type, const char* app_name);
 
 /**
  * @brief Enable dark mode for context menus (follow system setting)

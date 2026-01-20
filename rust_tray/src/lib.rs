@@ -18,6 +18,7 @@ pub mod actions;
 pub mod config;
 pub mod menu;
 pub mod menu_items;
+pub mod notification;
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
@@ -482,16 +483,74 @@ pub unsafe extern "C" fn tray_set_locale(locale: *const c_char) {
     }
 }
 
-/// Show a notification (placeholder - needs platform-specific implementation)
+/// Show a Windows toast notification
+/// 
+/// # Arguments
+/// * `title` - Notification title (UTF-8 string)
+/// * `text` - Notification body text (UTF-8 string)
+/// * `icon_type` - Icon type (0=normal, 1=playing, 2=pausing, 3=locked)
 #[no_mangle]
 pub unsafe extern "C" fn tray_show_notification(
     title: *const c_char,
     text: *const c_char,
-    _icon_type: c_int,
+    icon_type: c_int,
 ) {
     let title_str = c_str_to_string(title).unwrap_or_default();
     let text_str = c_str_to_string(text).unwrap_or_default();
     
-    // Log for now - proper notification support needs platform-specific implementation
-    eprintln!("Notification: {} - {}", title_str, text_str);
+    let icon = notification::NotificationIcon::from(icon_type);
+    notification::show_notification(&title_str, &text_str, icon);
+}
+
+/// Notification types for localized notifications
+/// These values must match the C enum
+#[repr(C)]
+pub enum NotificationType {
+    StreamStarted = 0,
+    StreamPaused = 1,
+    ApplicationStopped = 2,
+    PairingRequest = 3,
+}
+
+/// Show a localized toast notification
+/// 
+/// # Arguments
+/// * `notification_type` - Type of notification (0=stream_started, 1=stream_paused, 2=app_stopped, 3=pairing_request)
+/// * `app_name` - Application name for formatting (optional, UTF-8 string)
+#[no_mangle]
+pub unsafe extern "C" fn tray_show_localized_notification(
+    notification_type: c_int,
+    app_name: *const c_char,
+) {
+    let app_name_str = c_str_to_string(app_name).unwrap_or_default();
+    
+    let (title, text, icon) = match notification_type {
+        0 => {
+            // Stream started
+            let title = i18n::get_string(i18n::StringKey::StreamStarted);
+            let text = i18n::get_string_fmt(i18n::StringKey::StreamingStartedFor, &app_name_str);
+            (title.to_string(), text, notification::NotificationIcon::Playing)
+        },
+        1 => {
+            // Stream paused
+            let title = i18n::get_string(i18n::StringKey::StreamPaused);
+            let text = i18n::get_string_fmt(i18n::StringKey::StreamingPausedFor, &app_name_str);
+            (title.to_string(), text, notification::NotificationIcon::Pausing)
+        },
+        2 => {
+            // Application stopped
+            let title = i18n::get_string(i18n::StringKey::ApplicationStopped);
+            let text = i18n::get_string_fmt(i18n::StringKey::ApplicationStoppedMsg, &app_name_str);
+            (title.to_string(), text, notification::NotificationIcon::Normal)
+        },
+        3 => {
+            // Pairing request
+            let title = i18n::get_string_fmt(i18n::StringKey::IncomingPairingRequest, &app_name_str);
+            let text = i18n::get_string(i18n::StringKey::ClickToCompletePairing);
+            (title, text.to_string(), notification::NotificationIcon::Normal)
+        },
+        _ => return,
+    };
+    
+    notification::show_notification(&title, &text, icon);
 }
