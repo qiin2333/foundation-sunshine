@@ -3,7 +3,7 @@
 //! Supports Chinese, English, and Japanese translations.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use parking_lot::RwLock;
 use once_cell::sync::Lazy;
 
 /// Supported locales
@@ -316,12 +316,12 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
 
 /// Get current locale
 pub fn get_locale() -> Locale {
-    *CURRENT_LOCALE.read().unwrap()
+    *CURRENT_LOCALE.read()
 }
 
 /// Set current locale
 pub fn set_locale(locale: Locale) {
-    *CURRENT_LOCALE.write().unwrap() = locale;
+    *CURRENT_LOCALE.write() = locale;
 }
 
 /// Set locale from string

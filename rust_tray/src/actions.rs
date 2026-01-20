@@ -3,7 +3,7 @@
 //! Defines all menu actions and their identifiers.
 //! C++ side will register callbacks for these actions.
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 use once_cell::sync::Lazy;
 
 /// Menu action identifiers
@@ -70,12 +70,12 @@ static ACTION_CALLBACK: Lazy<RwLock<Option<ActionCallback>>> = Lazy::new(|| RwLo
 
 /// Register the callback for menu actions
 pub fn register_callback(callback: ActionCallback) {
-    *ACTION_CALLBACK.write().unwrap() = Some(callback);
+    *ACTION_CALLBACK.write() = Some(callback);
 }
 
 /// Trigger a menu action
 pub fn trigger_action(action: MenuAction) {
-    if let Some(callback) = *ACTION_CALLBACK.read().unwrap() {
+    if let Some(callback) = *ACTION_CALLBACK.read() {
         callback(action as u32);
     }
 }
