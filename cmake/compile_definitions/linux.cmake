@@ -195,9 +195,7 @@ if(${SUNSHINE_ENABLE_TRAY})
         include_directories(SYSTEM ${APPINDICATOR_INCLUDE_DIRS} ${LIBNOTIFY_INCLUDE_DIRS})
         link_directories(${APPINDICATOR_LIBRARY_DIRS} ${LIBNOTIFY_LIBRARY_DIRS})
 
-        # Rust tray implementation
-        include(${CMAKE_MODULE_PATH}/targets/rust_tray.cmake)
-        list(APPEND SUNSHINE_EXTERNAL_LIBRARIES ${RUST_TRAY_LIBRARY} ${RUST_TRAY_PLATFORM_LIBS})
+        list(APPEND PLATFORM_TARGET_FILES "${CMAKE_SOURCE_DIR}/third-party/tray/src/tray_linux.c")
         list(APPEND SUNSHINE_EXTERNAL_LIBRARIES ${APPINDICATOR_LIBRARIES} ${LIBNOTIFY_LIBRARIES})
     endif()
 else()

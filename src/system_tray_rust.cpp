@@ -39,8 +39,10 @@
 // Local includes
 #include "config.h"
 #include "confighttp.h"
+#include "display_device/display_device.h"
 #include "display_device/session.h"
 #include "entry_handler.h"
+#include "globals.h"
 #include "file_handler.h"
 #include "logging.h"
 #include "platform/common.h"
@@ -56,21 +58,21 @@ namespace system_tray {
 
   static std::atomic<bool> tray_initialized = false;
   static std::atomic<bool> end_tray_called = false;
-  
+
   // VDD state management
   static std::atomic<bool> s_vdd_in_cooldown = false;
 
   // Forward declarations
   static void handle_tray_action(uint32_t action);
-  
+
   /**
    * @brief Check if VDD is active
    */
   static bool is_vdd_active() {
-    auto vdd_device_id = display_device::session_t::get().get_vdd_id();
+    auto vdd_device_id = display_device::find_device_by_friendlyname(ZAKO_NAME);
     return !vdd_device_id.empty();
   }
-  
+
   /**
    * @brief Update VDD menu state in Rust tray
    */
@@ -78,22 +80,22 @@ namespace system_tray {
     bool vdd_active = is_vdd_active();
     bool keep_enabled = config::video.vdd_keep_enabled;
     bool in_cooldown = s_vdd_in_cooldown.load();
-    
+
     // Create: enabled when NOT active AND NOT in cooldown
     int can_create = (!vdd_active && !in_cooldown) ? 1 : 0;
     // Close: enabled when active AND NOT in cooldown AND NOT keep_enabled
     int can_close = (vdd_active && !in_cooldown && !keep_enabled) ? 1 : 0;
-    
+
     tray_update_vdd_menu(can_create, can_close, keep_enabled ? 1 : 0, vdd_active ? 1 : 0);
   }
-  
+
   /**
    * @brief Start VDD cooldown (10 seconds)
    */
   static void start_vdd_cooldown() {
     s_vdd_in_cooldown = true;
     update_vdd_menu_state();
-    
+
     std::thread([]() {
       std::this_thread::sleep_for(10s);
       s_vdd_in_cooldown = false;
@@ -107,7 +109,6 @@ namespace system_tray {
   static void handle_tray_action(uint32_t action) {
     switch (action) {
       case TRAY_ACTION_OPEN_UI:
-        BOOST_LOG(debug) << "Opening UI from system tray"sv;
         launch_ui();
         break;
 
@@ -119,7 +120,7 @@ namespace system_tray {
           }
         }
         break;
-      
+
       case TRAY_ACTION_VDD_CLOSE:
         BOOST_LOG(info) << "Closing VDD from system tray"sv;
         if (!s_vdd_in_cooldown && is_vdd_active() && !config::video.vdd_keep_enabled) {
@@ -127,48 +128,12 @@ namespace system_tray {
           start_vdd_cooldown();
         }
         break;
-      
+
       case TRAY_ACTION_VDD_PERSISTENT:
         BOOST_LOG(info) << "Toggling VDD persistent mode"sv;
-        // Toggle the keep_enabled setting
         config::video.vdd_keep_enabled = !config::video.vdd_keep_enabled;
-        // Save to config file
         config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
-        // Update menu state
         update_vdd_menu_state();
-        break;
-
-      case TRAY_ACTION_IMPORT_CONFIG:
-        BOOST_LOG(info) << "Import config requested"sv;
-        // Config import is now handled entirely in Rust
-        break;
-
-      case TRAY_ACTION_EXPORT_CONFIG:
-        BOOST_LOG(info) << "Export config requested"sv;
-        // Config export is now handled entirely in Rust
-        break;
-
-      case TRAY_ACTION_RESET_CONFIG:
-        BOOST_LOG(info) << "Reset config requested"sv;
-        // Reset config is now handled entirely in Rust
-        break;
-
-      case TRAY_ACTION_LANGUAGE_CHINESE:
-      case TRAY_ACTION_LANGUAGE_ENGLISH:
-      case TRAY_ACTION_LANGUAGE_JAPANESE:
-        // Language setting is now saved in Rust, just log here
-        BOOST_LOG(info) << "Tray language changed (saved by Rust)"sv;
-        break;
-
-      case TRAY_ACTION_STAR_PROJECT:
-        // Handled in Rust (opens URL)
-        BOOST_LOG(debug) << "Star project clicked"sv;
-        break;
-
-      case TRAY_ACTION_DONATE_YUNDI339:
-      case TRAY_ACTION_DONATE_QIIN:
-        // Handled in Rust (opens URL)
-        BOOST_LOG(debug) << "Donation link clicked"sv;
         break;
 
       case TRAY_ACTION_RESET_DISPLAY_DEVICE_CONFIG:
@@ -197,15 +162,13 @@ namespace system_tray {
         break;
 
       default:
-        BOOST_LOG(warning) << "Unknown tray action: " << action;
+        // Other actions are handled entirely in Rust
         break;
     }
   }
 
   void terminate_gui_processes() {
 #ifdef _WIN32
-    BOOST_LOG(info) << "Terminating sunshine-gui.exe processes..."sv;
-
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot != INVALID_HANDLE_VALUE) {
       PROCESSENTRY32W pe32;
@@ -214,12 +177,9 @@ namespace system_tray {
       if (Process32FirstW(snapshot, &pe32)) {
         do {
           if (wcscmp(pe32.szExeFile, L"sunshine-gui.exe") == 0) {
-            BOOST_LOG(info) << "Found sunshine-gui.exe (PID: " << pe32.th32ProcessID << "), terminating..."sv;
             HANDLE process_handle = OpenProcess(PROCESS_TERMINATE, FALSE, pe32.th32ProcessID);
             if (process_handle != NULL) {
-              if (TerminateProcess(process_handle, 0)) {
-                BOOST_LOG(info) << "Successfully terminated sunshine-gui.exe"sv;
-              }
+              TerminateProcess(process_handle, 0);
               CloseHandle(process_handle);
             }
           }
@@ -271,7 +231,6 @@ namespace system_tray {
     // Initialize VDD menu state
     update_vdd_menu_state();
 
-    BOOST_LOG(info) << "Rust tray initialized successfully"sv;
     return 0;
   }
 
@@ -295,7 +254,6 @@ namespace system_tray {
     tray_initialized = false;
     tray_exit();
 
-    BOOST_LOG(info) << "Rust tray shut down"sv;
     return 0;
   }
 
@@ -326,7 +284,7 @@ namespace system_tray {
 
     std::string tooltip = "Sunshine - Playing: " + app_name;
     tray_set_tooltip(tooltip.c_str());
-    
+
     // Show localized notification
     tray_show_localized_notification(TRAY_NOTIFICATION_STREAM_STARTED, app_name.c_str());
   }
@@ -338,7 +296,7 @@ namespace system_tray {
 
     std::string tooltip = "Sunshine - Paused: " + app_name;
     tray_set_tooltip(tooltip.c_str());
-    
+
     // Show localized notification
     tray_show_localized_notification(TRAY_NOTIFICATION_STREAM_PAUSED, app_name.c_str());
   }
@@ -350,7 +308,7 @@ namespace system_tray {
 
     std::string tooltip = "Sunshine "s + PROJECT_VER;
     tray_set_tooltip(tooltip.c_str());
-    
+
     // Show localized notification for application stopped
     if (!app_name.empty()) {
       tray_show_localized_notification(TRAY_NOTIFICATION_APP_STOPPED, app_name.c_str());
@@ -370,15 +328,10 @@ namespace system_tray {
     update_vdd_menu_state();
   }
 
-  // Stub implementations for compatibility
-  std::string get_localized_string(const std::string& key) {
-    // Localization is handled in Rust
-    return key;
-  }
-
-  std::wstring get_localized_wstring(const std::string& key) {
-    std::string s = get_localized_string(key);
-    return std::wstring(s.begin(), s.end());
+  void update_vdd_menu() {
+    if (!tray_initialized) return;
+    // Update VDD menu state (called by vdd_utils)
+    update_vdd_menu_state();
   }
 
 }  // namespace system_tray

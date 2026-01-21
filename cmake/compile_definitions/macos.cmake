@@ -53,7 +53,6 @@ set(PLATFORM_TARGET_FILES
 if(SUNSHINE_ENABLE_TRAY)
     list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
             ${COCOA})
-    # Rust tray implementation
-    include(${CMAKE_MODULE_PATH}/targets/rust_tray.cmake)
-    list(APPEND SUNSHINE_EXTERNAL_LIBRARIES ${RUST_TRAY_LIBRARY} ${RUST_TRAY_PLATFORM_LIBS})
+    list(APPEND PLATFORM_TARGET_FILES
+            "${CMAKE_SOURCE_DIR}/third-party/tray/src/tray_darwin.m")
 endif()
