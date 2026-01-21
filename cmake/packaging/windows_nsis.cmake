@@ -48,6 +48,13 @@ set(CPACK_NSIS_WELCOME_TITLE_3LINES "ON")
 set(CPACK_NSIS_FINISH_TITLE "安装完成！")
 set(CPACK_NSIS_FINISH_TEXT "Sunshine Foundation Game Streaming Server 已成功安装到您的系统中。\\r\\n\\r\\n点击 '完成' 开始使用这个强大的游戏流媒体服务器。")
 
+# Finish page run configuration - must be set before MUI pages are defined
+# 注意：
+# 1. 不要使用 $INSTDIR 变量，CPack 会自动添加
+# 2. 静默安装时 Finish 页面不显示，复选框不会触发
+# 3. 如果需要在静默安装后启动GUI，需要在 EXTRA_INSTALL_COMMANDS 中手动处理
+set(CPACK_NSIS_MUI_FINISHPAGE_RUN "assets\\\\gui\\\\sunshine-gui.exe")
+
 # ==============================================================================
 # Installation Progress and User Feedback
 # ==============================================================================
@@ -114,11 +121,12 @@ SET(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\install-service.bat\\\"'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\autostart-service.bat\\\"'
         
-        DetailPrint '✅ 安装完成！正在启动配置界面...'
-        ; 安装完成后自动打开使用教程
-        IfSilent skip_config_open 0
+        DetailPrint '✅ 安装完成！'
+        ; 仅在非静默安装时打开使用教程
+        IfSilent skip_post_install
+        DetailPrint '正在启动配置界面...'
         ExecShell 'open' 'https://docs.qq.com/aio/DSGdQc3htbFJjSFdO?p=DXpTjzl2kZwBjN7jlRMkRJ'
-        skip_config_open:
+        skip_post_install:
         
         NoController:
         ")
@@ -263,10 +271,6 @@ set(CPACK_NSIS_MANIFEST_DPI_AWARE true)
 
 # Request administrator privileges for proper installation
 set(CPACK_NSIS_REQUEST_EXECUTION_LEVEL "admin")
-
-# Enable modern installer features
-set(CPACK_NSIS_MUI_FINISHPAGE_RUN "\$INSTDIR\\\\assets\\\\gui\\\\sunshine-gui.exe")
-set(CPACK_NSIS_MUI_FINISHPAGE_RUN_TEXT "启动 Sunshine 控制面板")
 
 # Custom installer appearance
 set(CPACK_NSIS_DISPLAY_NAME "Sunshine Foundation Game Streaming Server v${CPACK_PACKAGE_VERSION}")
