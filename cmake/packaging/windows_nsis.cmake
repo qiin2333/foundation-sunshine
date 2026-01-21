@@ -57,6 +57,14 @@ SET(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
         "${CPACK_NSIS_EXTRA_INSTALL_COMMANDS}
         ; 确保覆盖模式仍然生效
         SetOverwrite try
+
+        ; ----------------------------------------------------------------------
+        ; 清理便携版脚本：安装版不需要这两个文件
+        ; 需求：如果目录下有 install_portable.bat / uninstall_portable.bat，就删除
+        ; ----------------------------------------------------------------------
+        DetailPrint '🧹 清理便携版脚本...'
+        Delete '\\\"$INSTDIR\\\\install_portable.bat\\\"'
+        Delete '\\\"$INSTDIR\\\\uninstall_portable.bat\\\"'
         
         ; 重置文件权限
         DetailPrint '🔓 重置文件权限...'
