@@ -4,8 +4,9 @@
  * 
  * 该模块提供安全的配置文件操作，可以从 Rust 托盘和 C++ 代码中调用。
  * 
- * 注意：由于 Sunshine 以 SYSTEM 用户身份运行，无法访问普通用户的桌面和快速访问位置。
- * 因此我们使用 FOS_HIDEPINNEDPLACES 隐藏快速访问栏，并手动添加常用导航位置。
+ * 注意：由于 Sunshine 以 SYSTEM 用户身份运行，文件对话框需要特殊处理。
+ * 我们使用 ImpersonateLoggedOnUser 模拟登录用户的身份，使文件对话框能够
+ * 正确显示用户的快速访问栏和文件夹。
  */
 
 #include "config_operations.h"
@@ -153,7 +154,7 @@ namespace config_operations {
    * @brief 获取当前控制台会话登录用户的令牌
    * 
    * 由于 Sunshine 以 SYSTEM 用户运行，我们需要获取实际登录用户的令牌
-   * 才能访问其桌面等用户文件夹。
+   * 才能正确显示用户的文件对话框。
    * 
    * @return 用户令牌句柄，失败返回 NULL。调用者需要调用 CloseHandle 释放。
    */
@@ -175,283 +176,173 @@ namespace config_operations {
   }
 
   /**
-   * @brief 为文件对话框添加导航位置
+   * @brief 在登录用户上下文中显示文件对话框的实际实现
    * 
-   * 由于以 SYSTEM 用户运行，快速访问栏无法正常工作（会尝试访问 SYSTEM 用户的
-   * 桌面，但该位置不存在）。我们使用 FOS_HIDEPINNEDPLACES 隐藏快速访问栏，
-   * 并手动添加有用的导航位置：
+   * 这是内部实现函数，在已经模拟用户身份后调用。
    * 
-   * 1. 当前登录用户的桌面（如果可以获取）
-   * 2. 公共桌面
-   * 3. 此电脑
-   * 4. 所有驱动器
-   * 5. 网络
-   * 
-   * @param pDialog 文件对话框接口指针
+   * @param is_save 是否为保存对话框
+   * @return 用户选择的文件路径
    */
-  static void add_dialog_places(IFileDialog *pDialog) {
-    // 尝试获取当前登录用户的桌面
+  static std::wstring show_file_dialog_impl(bool is_save) {
+    std::wstring result;
+    
+    // 初始化 COM
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    bool com_initialized = SUCCEEDED(hr);
+
+    // 创建文件对话框
+    IFileDialog *pDialog = nullptr;
+    hr = CoCreateInstance(is_save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog, 
+                          NULL, CLSCTX_ALL,
+                          is_save ? IID_IFileSaveDialog : IID_IFileOpenDialog, 
+                          reinterpret_cast<void**>(&pDialog));
+    
+    if (FAILED(hr)) {
+      BOOST_LOG(error) << "[config_ops] 创建文件对话框失败，HRESULT: " << std::hex << hr;
+      if (com_initialized) CoUninitialize();
+      return result;
+    }
+
+    // 设置对话框选项
+    // FOS_FORCEFILESYSTEM: 只允许选择文件系统中的项目
+    // FOS_DONTADDTORECENT: 不添加到最近使用列表
+    // FOS_NOCHANGEDIR: 不改变当前工作目录
+    // FOS_NOVALIDATE: 允许选择不存在的文件名（我们自己验证）
+    // 
+    // 注意：不使用 FOS_HIDEPINNEDPLACES，因为我们通过 ImpersonateLoggedOnUser
+    // 模拟登录用户身份，快速访问栏会正确显示用户的文件夹位置。
+    DWORD dwFlags;
+    pDialog->GetOptions(&dwFlags);
+    DWORD extra_flags = FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_DONTADDTORECENT | FOS_NOCHANGEDIR | FOS_NOVALIDATE;
+    extra_flags |= is_save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST;
+    pDialog->SetOptions(dwFlags | extra_flags);
+
+    // 设置文件类型过滤器
+    std::wstring config_label = system_tray_i18n::utf8_to_wstring(
+        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_CONFIG_FILES));
+    std::wstring all_files_label = system_tray_i18n::utf8_to_wstring(
+        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_ALL_FILES));
+    
+    COMDLG_FILTERSPEC fileTypes[] = {
+      { config_label.c_str(), L"*.conf" },
+      { all_files_label.c_str(), L"*.*" }
+    };
+    pDialog->SetFileTypes(2, fileTypes);
+    pDialog->SetFileTypeIndex(1);
+
+    // 设置对话框标题
+    std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(
+        system_tray_i18n::get_localized_string(is_save ? system_tray_i18n::KEY_FILE_DIALOG_SAVE_EXPORT 
+                                                        : system_tray_i18n::KEY_FILE_DIALOG_SELECT_IMPORT));
+    pDialog->SetTitle(dialog_title.c_str());
+
+    // 保存对话框特有设置
+    if (is_save) {
+      IFileSaveDialog *pFileSave = static_cast<IFileSaveDialog*>(pDialog);
+      pFileSave->SetDefaultExtension(L"conf");
+      
+      // 生成默认文件名（带时间戳）
+      std::string default_name = "sunshine_config_" + std::to_string(std::time(nullptr)) + ".conf";
+      std::wstring wdefault_name(default_name.begin(), default_name.end());
+      pFileSave->SetFileName(wdefault_name.c_str());
+    }
+
+    // 设置默认文件夹为应用程序数据目录
+    IShellItem *psiDefault = NULL;
+    std::wstring default_path = platf::appdata().wstring();
+    if (SUCCEEDED(SHCreateItemFromParsingName(default_path.c_str(), NULL, IID_PPV_ARGS(&psiDefault)))) {
+      pDialog->SetFolder(psiDefault);
+      psiDefault->Release();
+    }
+
+    // 显示对话框
+    hr = pDialog->Show(NULL);
+    if (SUCCEEDED(hr)) {
+      // 获取用户选择的文件
+      IShellItem *pItem = nullptr;
+      hr = pDialog->GetResult(&pItem);
+      if (SUCCEEDED(hr)) {
+        PWSTR pszFilePath = nullptr;
+        hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+        if (SUCCEEDED(hr)) {
+          result = pszFilePath;
+          CoTaskMemFree(pszFilePath);
+        }
+        pItem->Release();
+      }
+    }
+
+    pDialog->Release();
+    if (com_initialized) CoUninitialize();
+    
+    return result;
+  }
+
+  /**
+   * @brief 在登录用户上下文中显示文件对话框
+   * 
+   * 由于 Sunshine 以 SYSTEM 用户运行，文件对话框的快速访问栏会尝试访问
+   * SYSTEM 用户的配置。此函数通过 ImpersonateLoggedOnUser 临时模拟
+   * 登录用户的身份，使文件对话框能够正确显示用户的快速访问栏。
+   * 
+   * @param is_save 是否为保存对话框
+   * @return 用户选择的文件路径（宽字符串），如果取消则返回空字符串
+   */
+  static std::wstring show_file_dialog_as_user(bool is_save) {
+    std::wstring result;
+    bool impersonating = false;
+    
+    // 尝试获取登录用户的令牌
     HANDLE user_token = get_console_user_token();
     if (user_token != NULL) {
-      PWSTR user_desktop = NULL;
-      // 使用用户令牌获取其桌面路径
-      if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Desktop, KF_FLAG_DEFAULT, user_token, &user_desktop))) {
-        IShellItem *psiDesktop = NULL;
-        if (SUCCEEDED(SHCreateItemFromParsingName(user_desktop, NULL, IID_PPV_ARGS(&psiDesktop)))) {
-          pDialog->AddPlace(psiDesktop, FDAP_TOP);
-          psiDesktop->Release();
-          BOOST_LOG(debug) << "[config_ops] 已添加用户桌面到导航栏";
-        }
-        CoTaskMemFree(user_desktop);
+      // 模拟登录用户身份
+      if (ImpersonateLoggedOnUser(user_token)) {
+        BOOST_LOG(debug) << "[config_ops] 成功模拟登录用户身份";
+        impersonating = true;
       }
-      
-      // 获取用户的下载文件夹
-      PWSTR user_downloads = NULL;
-      if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, user_token, &user_downloads))) {
-        IShellItem *psiDownloads = NULL;
-        if (SUCCEEDED(SHCreateItemFromParsingName(user_downloads, NULL, IID_PPV_ARGS(&psiDownloads)))) {
-          pDialog->AddPlace(psiDownloads, FDAP_TOP);
-          psiDownloads->Release();
-          BOOST_LOG(debug) << "[config_ops] 已添加用户下载文件夹到导航栏";
-        }
-        CoTaskMemFree(user_downloads);
+      else {
+        BOOST_LOG(warning) << "[config_ops] 模拟用户身份失败，错误码: " << GetLastError();
       }
-      
-      // 获取用户的文档文件夹
-      PWSTR user_documents = NULL;
-      if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT, user_token, &user_documents))) {
-        IShellItem *psiDocuments = NULL;
-        if (SUCCEEDED(SHCreateItemFromParsingName(user_documents, NULL, IID_PPV_ARGS(&psiDocuments)))) {
-          pDialog->AddPlace(psiDocuments, FDAP_TOP);
-          psiDocuments->Release();
-          BOOST_LOG(debug) << "[config_ops] 已添加用户文档文件夹到导航栏";
-        }
-        CoTaskMemFree(user_documents);
-      }
-      
       CloseHandle(user_token);
     }
     else {
-      BOOST_LOG(debug) << "[config_ops] 无法获取用户令牌，将添加公共桌面作为替代";
-      
-      // 如果无法获取用户令牌，添加公共桌面
-      IShellItem *psiPublicDesktop = NULL;
-      if (SUCCEEDED(SHGetKnownFolderItem(FOLDERID_PublicDesktop, KF_FLAG_DEFAULT, NULL, IID_PPV_ARGS(&psiPublicDesktop)))) {
-        pDialog->AddPlace(psiPublicDesktop, FDAP_TOP);
-        psiPublicDesktop->Release();
-        BOOST_LOG(debug) << "[config_ops] 已添加公共桌面到导航栏";
-      }
+      BOOST_LOG(warning) << "[config_ops] 无法获取登录用户令牌，将以 SYSTEM 身份显示对话框";
     }
-
-    // 添加"此电脑"到导航栏
-    IShellItem *psiComputer = NULL;
-    if (SUCCEEDED(SHGetKnownFolderItem(FOLDERID_ComputerFolder, KF_FLAG_DEFAULT, NULL, IID_PPV_ARGS(&psiComputer)))) {
-      pDialog->AddPlace(psiComputer, FDAP_TOP);
-      psiComputer->Release();
-      BOOST_LOG(debug) << "[config_ops] 已添加\"此电脑\"到导航栏";
+    
+    // 在用户上下文中初始化 COM 和显示对话框
+    result = show_file_dialog_impl(is_save);
+    
+    // 恢复 SYSTEM 身份
+    if (impersonating) {
+      RevertToSelf();
+      BOOST_LOG(debug) << "[config_ops] 已恢复 SYSTEM 身份";
     }
-
-    // 枚举并添加所有驱动器
-    DWORD dwSize = GetLogicalDriveStringsW(0, NULL);
-    if (dwSize > 0) {
-      std::vector<wchar_t> buffer(dwSize + 1);
-      if (GetLogicalDriveStringsW(dwSize, buffer.data())) {
-        for (wchar_t* pDrive = buffer.data(); *pDrive; pDrive += wcslen(pDrive) + 1) {
-          IShellItem *psiDrive = NULL;
-          if (SUCCEEDED(SHCreateItemFromParsingName(pDrive, NULL, IID_PPV_ARGS(&psiDrive)))) {
-            pDialog->AddPlace(psiDrive, FDAP_BOTTOM);
-            psiDrive->Release();
-          }
-        }
-      }
-    }
-
-    // 添加"网络"到导航栏
-    IShellItem *psiNetwork = NULL;
-    if (SUCCEEDED(SHGetKnownFolderItem(FOLDERID_NetworkFolder, KF_FLAG_DEFAULT, NULL, IID_PPV_ARGS(&psiNetwork)))) {
-      pDialog->AddPlace(psiNetwork, FDAP_BOTTOM);
-      psiNetwork->Release();
-      BOOST_LOG(debug) << "[config_ops] 已添加\"网络\"到导航栏";
-    }
+    
+    return result;
   }
 
   /**
    * @brief 显示文件打开对话框
    * 
    * 使用 Windows IFileOpenDialog COM 接口显示现代文件打开对话框。
+   * 通过模拟登录用户身份，确保快速访问栏正确显示用户的文件夹位置。
    * 
    * @return 用户选择的文件路径（宽字符串），如果取消则返回空字符串
    */
   static std::wstring show_open_file_dialog() {
-    std::wstring result;
-    
-    // 初始化 COM
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    bool com_initialized = SUCCEEDED(hr);
-
-    // 创建文件打开对话框
-    IFileOpenDialog *pFileOpen = nullptr;
-    hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
-                          IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
-    
-    if (FAILED(hr)) {
-      BOOST_LOG(error) << "[config_ops] 创建文件打开对话框失败，HRESULT: " << std::hex << hr;
-      if (com_initialized) CoUninitialize();
-      return result;
-    }
-
-    // 设置对话框选项
-    // FOS_HIDEPINNEDPLACES: 隐藏快速访问栏（因为以 SYSTEM 用户运行无法访问）
-    // FOS_FORCEFILESYSTEM: 只允许选择文件系统中的项目
-    // FOS_DONTADDTORECENT: 不添加到最近使用列表
-    // FOS_NOCHANGEDIR: 不改变当前工作目录
-    // FOS_NOVALIDATE: 允许选择不存在的文件名（我们自己验证）
-    DWORD dwFlags;
-    pFileOpen->GetOptions(&dwFlags);
-    pFileOpen->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST | 
-                          FOS_DONTADDTORECENT | FOS_NOCHANGEDIR | FOS_HIDEPINNEDPLACES | FOS_NOVALIDATE);
-
-    // 设置文件类型过滤器
-    std::wstring config_label = system_tray_i18n::utf8_to_wstring(
-        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_CONFIG_FILES));
-    std::wstring all_files_label = system_tray_i18n::utf8_to_wstring(
-        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_ALL_FILES));
-    
-    COMDLG_FILTERSPEC fileTypes[] = {
-      { config_label.c_str(), L"*.conf" },
-      { all_files_label.c_str(), L"*.*" }
-    };
-    pFileOpen->SetFileTypes(2, fileTypes);
-    pFileOpen->SetFileTypeIndex(1);  // 默认选择 .conf 过滤器
-
-    // 设置对话框标题
-    std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(
-        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_SELECT_IMPORT));
-    pFileOpen->SetTitle(dialog_title.c_str());
-
-    // 设置默认文件夹为应用程序数据目录
-    IShellItem *psiDefault = NULL;
-    std::wstring default_path = platf::appdata().wstring();
-    if (SUCCEEDED(SHCreateItemFromParsingName(default_path.c_str(), NULL, IID_PPV_ARGS(&psiDefault)))) {
-      pFileOpen->SetFolder(psiDefault);
-      psiDefault->Release();
-    }
-
-    // 添加导航位置（驱动器、此电脑、网络等）
-    add_dialog_places(pFileOpen);
-
-    // 显示对话框
-    hr = pFileOpen->Show(NULL);
-    if (SUCCEEDED(hr)) {
-      // 获取用户选择的文件
-      IShellItem *pItem = nullptr;
-      hr = pFileOpen->GetResult(&pItem);
-      if (SUCCEEDED(hr)) {
-        PWSTR pszFilePath = nullptr;
-        hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
-        if (SUCCEEDED(hr)) {
-          result = pszFilePath;
-          CoTaskMemFree(pszFilePath);
-        }
-        pItem->Release();
-      }
-    }
-
-    pFileOpen->Release();
-    if (com_initialized) CoUninitialize();
-    
-    return result;
+    return show_file_dialog_as_user(false);
   }
 
   /**
    * @brief 显示文件保存对话框
    * 
    * 使用 Windows IFileSaveDialog COM 接口显示现代文件保存对话框。
+   * 通过模拟登录用户身份，确保快速访问栏正确显示用户的文件夹位置。
    * 
    * @return 用户选择的保存路径（宽字符串），如果取消则返回空字符串
    */
   static std::wstring show_save_file_dialog() {
-    std::wstring result;
-    
-    // 初始化 COM
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    bool com_initialized = SUCCEEDED(hr);
-
-    // 创建文件保存对话框
-    IFileSaveDialog *pFileSave = nullptr;
-    hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_ALL,
-                          IID_IFileSaveDialog, reinterpret_cast<void**>(&pFileSave));
-    
-    if (FAILED(hr)) {
-      BOOST_LOG(error) << "[config_ops] 创建文件保存对话框失败，HRESULT: " << std::hex << hr;
-      if (com_initialized) CoUninitialize();
-      return result;
-    }
-
-    // 设置对话框选项
-    DWORD dwFlags;
-    pFileSave->GetOptions(&dwFlags);
-    pFileSave->SetOptions(dwFlags | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT |
-                          FOS_DONTADDTORECENT | FOS_NOCHANGEDIR | FOS_HIDEPINNEDPLACES | FOS_NOVALIDATE);
-
-    // 设置文件类型过滤器
-    std::wstring config_label = system_tray_i18n::utf8_to_wstring(
-        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_CONFIG_FILES));
-    std::wstring all_files_label = system_tray_i18n::utf8_to_wstring(
-        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_ALL_FILES));
-    
-    COMDLG_FILTERSPEC fileTypes[] = {
-      { config_label.c_str(), L"*.conf" },
-      { all_files_label.c_str(), L"*.*" }
-    };
-    pFileSave->SetFileTypes(2, fileTypes);
-    pFileSave->SetFileTypeIndex(1);
-
-    // 设置默认扩展名
-    pFileSave->SetDefaultExtension(L"conf");
-
-    // 生成默认文件名（带时间戳）
-    std::string default_name = "sunshine_config_" + std::to_string(std::time(nullptr)) + ".conf";
-    std::wstring wdefault_name(default_name.begin(), default_name.end());
-    pFileSave->SetFileName(wdefault_name.c_str());
-
-    // 设置对话框标题
-    std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(
-        system_tray_i18n::get_localized_string(system_tray_i18n::KEY_FILE_DIALOG_SAVE_EXPORT));
-    pFileSave->SetTitle(dialog_title.c_str());
-
-    // 设置默认文件夹为应用程序数据目录
-    IShellItem *psiDefault = NULL;
-    std::wstring default_path = platf::appdata().wstring();
-    if (SUCCEEDED(SHCreateItemFromParsingName(default_path.c_str(), NULL, IID_PPV_ARGS(&psiDefault)))) {
-      pFileSave->SetFolder(psiDefault);
-      psiDefault->Release();
-    }
-
-    // 添加导航位置
-    add_dialog_places(pFileSave);
-
-    // 显示对话框
-    hr = pFileSave->Show(NULL);
-    if (SUCCEEDED(hr)) {
-      // 获取用户选择的保存路径
-      IShellItem *pItem = nullptr;
-      hr = pFileSave->GetResult(&pItem);
-      if (SUCCEEDED(hr)) {
-        PWSTR pszFilePath = nullptr;
-        hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
-        if (SUCCEEDED(hr)) {
-          result = pszFilePath;
-          CoTaskMemFree(pszFilePath);
-        }
-        pItem->Release();
-      }
-    }
-
-    pFileSave->Release();
-    if (com_initialized) CoUninitialize();
-    
-    return result;
+    return show_file_dialog_as_user(true);
   }
 
   /**
