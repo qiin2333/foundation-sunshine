@@ -15,10 +15,7 @@ pub enum MenuAction {
     VddCreate = 2,
     VddClose = 3,
     VddPersistent = 4,
-    // Config actions
-    ImportConfig = 5,
-    ExportConfig = 6,
-    ResetConfig = 7,
+    // Reserved: 5, 6, 7 (removed import/export/reset config)
     CloseApp = 8,
     // Language actions
     LanguageChinese = 9,
@@ -43,9 +40,7 @@ impl TryFrom<u32> for MenuAction {
             2 => Ok(MenuAction::VddCreate),
             3 => Ok(MenuAction::VddClose),
             4 => Ok(MenuAction::VddPersistent),
-            5 => Ok(MenuAction::ImportConfig),
-            6 => Ok(MenuAction::ExportConfig),
-            7 => Ok(MenuAction::ResetConfig),
+            // 5, 6, 7 reserved (removed import/export/reset config)
             8 => Ok(MenuAction::CloseApp),
             9 => Ok(MenuAction::LanguageChinese),
             10 => Ok(MenuAction::LanguageEnglish),

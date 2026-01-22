@@ -19,10 +19,7 @@ typedef enum {
     TRAY_ACTION_VDD_CREATE = 2,
     TRAY_ACTION_VDD_CLOSE = 3,
     TRAY_ACTION_VDD_PERSISTENT = 4,
-    // Config actions
-    TRAY_ACTION_IMPORT_CONFIG = 5,
-    TRAY_ACTION_EXPORT_CONFIG = 6,
-    TRAY_ACTION_RESET_CONFIG = 7,
+    // Reserved: 5, 6, 7 (removed import/export/reset config)
     TRAY_ACTION_CLOSE_APP = 8,
     // Language actions
     TRAY_ACTION_LANGUAGE_CHINESE = 9,

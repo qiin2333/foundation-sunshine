@@ -117,8 +117,6 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/network.cpp"
         "${CMAKE_SOURCE_DIR}/src/network.h"
         "${CMAKE_SOURCE_DIR}/src/move_by_copy.h"
-        "${CMAKE_SOURCE_DIR}/src/config_operations.cpp"
-        "${CMAKE_SOURCE_DIR}/src/config_operations.h"
         "${CMAKE_SOURCE_DIR}/src/system_tray_rust.cpp"
         "${CMAKE_SOURCE_DIR}/src/system_tray.h"
         "${CMAKE_SOURCE_DIR}/src/system_tray_i18n.cpp"

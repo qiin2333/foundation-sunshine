@@ -4,8 +4,6 @@
 //! 
 //! 配置文件路径通过 C++ 的 tray_init_ex 函数获取，
 //! 确保与主 Sunshine 应用程序使用相同的配置路径。
-//! 
-//! 注意：导入/导出/重置配置的功能已迁移到 C++ 的 config_operations.cpp 中实现。
 
 use std::collections::HashMap;
 use std::ffi::OsStr;

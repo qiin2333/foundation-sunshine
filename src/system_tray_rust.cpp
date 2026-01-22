@@ -38,7 +38,6 @@
 
 // Local includes
 #include "config.h"
-#include "config_operations.h"
 #include "confighttp.h"
 #include "display_device/display_device.h"
 #include "display_device/session.h"
@@ -135,18 +134,6 @@ namespace system_tray {
         config::video.vdd_keep_enabled = !config::video.vdd_keep_enabled;
         config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
         update_vdd_menu_state();
-        break;
-
-      case TRAY_ACTION_IMPORT_CONFIG:
-        config_operations::import_config();
-        break;
-
-      case TRAY_ACTION_EXPORT_CONFIG:
-        config_operations::export_config();
-        break;
-
-      case TRAY_ACTION_RESET_CONFIG:
-        config_operations::reset_config();
         break;
 
       case TRAY_ACTION_STAR_PROJECT:

@@ -141,10 +141,6 @@ pub mod ids {
 
     // Advanced Settings submenu
     pub const ADVANCED_SUBMENU: &str = "advanced_submenu";
-    pub const IMPORT_CONFIG: &str = "import_config";
-    pub const EXPORT_CONFIG: &str = "export_config";
-    pub const RESET_CONFIG: &str = "reset_config";
-    pub const SEP_ADV: &str = "sep_adv";
     pub const CLOSE_APP: &str = "close_app";
     pub const RESET_DISPLAY: &str = "reset_display";
 
@@ -184,15 +180,6 @@ mod handlers {
     pub fn vdd_persistent() {
         // VDD persistent toggle - C++ handles the confirmation and config save
         // The Rust side only receives the menu click event
-    }
-
-    pub fn import_config() {
-    }
-
-    pub fn export_config() {
-    }
-
-    pub fn reset_config() {
     }
 
     pub fn close_app() {
@@ -284,13 +271,6 @@ pub fn get_all_items() -> Vec<MenuItemInfo> {
 
         // ====== Advanced Settings Submenu ======
         MenuItemInfo::submenu(ADVANCED_SUBMENU, StringKey::AdvancedSettings, None, 400),
-        MenuItemInfo::action(IMPORT_CONFIG, StringKey::ImportConfig, Some(ADVANCED_SUBMENU), 410)
-            .with_handler(handlers::import_config),
-        MenuItemInfo::action(EXPORT_CONFIG, StringKey::ExportConfig, Some(ADVANCED_SUBMENU), 420)
-            .with_handler(handlers::export_config),
-        MenuItemInfo::action(RESET_CONFIG, StringKey::ResetToDefault, Some(ADVANCED_SUBMENU), 430)
-            .with_handler(handlers::reset_config),
-        MenuItemInfo::separator(SEP_ADV, Some(ADVANCED_SUBMENU), 440),
         MenuItemInfo::action(CLOSE_APP, StringKey::CloseApp, Some(ADVANCED_SUBMENU), 450)
             .with_handler(handlers::close_app),
         MenuItemInfo::action(RESET_DISPLAY, StringKey::ResetDisplayDeviceConfig, Some(ADVANCED_SUBMENU), 460)
@@ -362,9 +342,6 @@ fn trigger_action_for_id(item_id: &str) {
         VDD_CREATE => Some(MenuAction::VddCreate),
         VDD_CLOSE => Some(MenuAction::VddClose),
         VDD_PERSISTENT => Some(MenuAction::VddPersistent),
-        IMPORT_CONFIG => Some(MenuAction::ImportConfig),
-        EXPORT_CONFIG => Some(MenuAction::ExportConfig),
-        RESET_CONFIG => Some(MenuAction::ResetConfig),
         CLOSE_APP => Some(MenuAction::CloseApp),
         LANG_CHINESE => Some(MenuAction::LanguageChinese),
         LANG_ENGLISH => Some(MenuAction::LanguageEnglish),
