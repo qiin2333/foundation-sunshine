@@ -8,7 +8,7 @@
 //! 3. Done! No need to modify any other files.
 
 use crate::i18n::{StringKey, get_string, set_locale_str};
-use crate::actions::{open_url, urls, trigger_action};
+use crate::actions::trigger_action;
 use crate::config;
 
 /// Menu item handler function type
@@ -187,54 +187,12 @@ mod handlers {
     }
 
     pub fn import_config() {
-        std::thread::spawn(|| {
-            if let Err(e) = config::import_config() {
-                match e {
-                    config::ConfigError::DialogCancelled => {}
-                    _ => {
-                        config::show_message_box(
-                            get_string(StringKey::ImportErrorTitle),
-                            &format!("{}", e),
-                            true,
-                        );
-                    }
-                }
-            }
-        });
     }
 
     pub fn export_config() {
-        std::thread::spawn(|| {
-            if let Err(e) = config::export_config() {
-                match e {
-                    config::ConfigError::DialogCancelled => {}
-                    _ => {
-                        config::show_message_box(
-                            get_string(StringKey::ExportErrorTitle),
-                            &format!("{}", e),
-                            true,
-                        );
-                    }
-                }
-            }
-        });
     }
 
     pub fn reset_config() {
-        std::thread::spawn(|| {
-            if let Err(e) = config::reset_config() {
-                match e {
-                    config::ConfigError::DialogCancelled => {}
-                    _ => {
-                        config::show_message_box(
-                            get_string(StringKey::ResetErrorTitle),
-                            &format!("{}", e),
-                            true,
-                        );
-                    }
-                }
-            }
-        });
     }
 
     pub fn close_app() {
@@ -275,15 +233,12 @@ mod handlers {
     }
 
     pub fn star_project() {
-        open_url(urls::GITHUB_PROJECT);
     }
 
     pub fn visit_sunshine() {
-        open_url(urls::PROJECT_SUNSHINE);
     }
 
     pub fn visit_moonlight() {
-        open_url(urls::PROJECT_MOONLIGHT);
     }
 
     pub fn restart() {

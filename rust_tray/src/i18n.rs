@@ -100,10 +100,6 @@ pub enum StringKey {
     ResetErrorTitle,
     ResetErrorMsg,
     ResetErrorException,
-    FileDialogSelectImport,
-    FileDialogSaveExport,
-    FileDialogConfigFiles,
-    FileDialogAllFiles,
 }
 
 /// Current locale storage
@@ -174,10 +170,6 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::English, StringKey::ResetErrorTitle), "Reset Error");
     m.insert((Locale::English, StringKey::ResetErrorMsg), "Failed to reset configuration file.");
     m.insert((Locale::English, StringKey::ResetErrorException), "An error occurred while resetting configuration.");
-    m.insert((Locale::English, StringKey::FileDialogSelectImport), "Select Configuration File to Import");
-    m.insert((Locale::English, StringKey::FileDialogSaveExport), "Save Configuration File As");
-    m.insert((Locale::English, StringKey::FileDialogConfigFiles), "Configuration Files");
-    m.insert((Locale::English, StringKey::FileDialogAllFiles), "All Files");
 
     // Chinese translations
     m.insert((Locale::Chinese, StringKey::OpenSunshine), "打开 Sunshine");
@@ -240,10 +232,6 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::Chinese, StringKey::ResetErrorTitle), "重置失败");
     m.insert((Locale::Chinese, StringKey::ResetErrorMsg), "无法重置配置文件。");
     m.insert((Locale::Chinese, StringKey::ResetErrorException), "重置配置时发生错误。");
-    m.insert((Locale::Chinese, StringKey::FileDialogSelectImport), "选择要导入的配置文件");
-    m.insert((Locale::Chinese, StringKey::FileDialogSaveExport), "配置文件另存为");
-    m.insert((Locale::Chinese, StringKey::FileDialogConfigFiles), "配置文件");
-    m.insert((Locale::Chinese, StringKey::FileDialogAllFiles), "所有文件");
 
     // Japanese translations
     m.insert((Locale::Japanese, StringKey::OpenSunshine), "Sunshineを開く");
@@ -306,10 +294,6 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::Japanese, StringKey::ResetErrorTitle), "リセット失敗");
     m.insert((Locale::Japanese, StringKey::ResetErrorMsg), "設定ファイルをリセットできませんでした。");
     m.insert((Locale::Japanese, StringKey::ResetErrorException), "設定のリセット中にエラーが発生しました。");
-    m.insert((Locale::Japanese, StringKey::FileDialogSelectImport), "インポートする設定ファイルを選択");
-    m.insert((Locale::Japanese, StringKey::FileDialogSaveExport), "設定ファイルに名前を付けて保存");
-    m.insert((Locale::Japanese, StringKey::FileDialogConfigFiles), "設定ファイル");
-    m.insert((Locale::Japanese, StringKey::FileDialogAllFiles), "すべてのファイル");
 
     m
 });
