@@ -79,6 +79,28 @@ Function GetParent
         Pop $1
         Exch $0
 FunctionEnd
+
+; Finish Page 自定义选项
+; 复选框1: 打开使用教程（默认勾选）
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT '打开使用教程'
+!define MUI_FINISHPAGE_RUN_FUNCTION OpenDocumentation
+
+; 复选框2: 创建桌面快捷方式（默认勾选）
+!define MUI_FINISHPAGE_SHOWREADME
+!define MUI_FINISHPAGE_SHOWREADME_TEXT '创建桌面快捷方式'
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateDesktopShortcuts
+
+Function OpenDocumentation
+    ExecShell 'open' 'https://docs.qq.com/aio/DSGdQc3htbFJjSFdO?p=DXpTjzl2kZwBjN7jlRMkRJ'
+FunctionEnd
+
+Function CreateDesktopShortcuts
+    ; 创建桌面快捷方式 - 使用可执行文件的内嵌图标
+    CreateShortCut '\$DESKTOP\\\\Sunshine.lnk' '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' '--shortcut' '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' 0
+    ; 创建桌面快捷方式 - GUI管理工具
+    CreateShortCut '\$DESKTOP\\\\Sunshine GUI.lnk' '\$INSTDIR\\\\assets\\\\gui\\\\sunshine-gui.exe' '' '\$INSTDIR\\\\assets\\\\gui\\\\sunshine-gui.exe' 0
+FunctionEnd
 ")
 
 # ==============================================================================
@@ -126,12 +148,9 @@ set(CPACK_NSIS_WELCOME_TITLE_3LINES "ON")
 set(CPACK_NSIS_FINISH_TITLE "安装完成！")
 set(CPACK_NSIS_FINISH_TEXT "Sunshine Foundation Game Streaming Server 已成功安装到您的系统中。\\r\\n\\r\\n点击 '完成' 开始使用这个强大的游戏流媒体服务器。")
 
-# Finish page run configuration - must be set before MUI pages are defined
-# 注意：
-# 1. 不要使用 $INSTDIR 变量，CPack 会自动添加
-# 2. 静默安装时 Finish 页面不显示，复选框不会触发
-# 3. 如果需要在静默安装后启动GUI，需要在 EXTRA_INSTALL_COMMANDS 中手动处理
-set(CPACK_NSIS_MUI_FINISHPAGE_RUN "assets\\\\gui\\\\sunshine-gui.exe")
+# Finish page 选项已在 CPACK_NSIS_INSTALLER_MUI_ICON_CODE 中通过自定义函数实现：
+# - 复选框1: 打开使用教程（MUI_FINISHPAGE_RUN_FUNCTION）
+# - 复选框2: 创建桌面快捷方式（MUI_FINISHPAGE_SHOWREADME_FUNCTION）
 
 # ==============================================================================
 # Installation Progress and User Feedback
@@ -200,12 +219,6 @@ SET(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\autostart-service.bat\\\"'
         
         DetailPrint '✅ 安装完成！'
-        ; 仅在非静默安装时打开使用教程
-        IfSilent skip_post_install
-        DetailPrint '正在启动配置界面...'
-        ExecShell 'open' 'https://docs.qq.com/aio/DSGdQc3htbFJjSFdO?p=DXpTjzl2kZwBjN7jlRMkRJ'
-        skip_post_install:
-        
         NoController:
         ")
 
@@ -273,14 +286,6 @@ set(CPACK_NSIS_CREATE_ICONS_EXTRA
         ; 工具文件夹快捷方式 - 使用主程序图标
         CreateShortCut '\$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\Sunshine Tools.lnk' \
             '\$INSTDIR\\\\tools' '' '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' 0
-        
-        ; 创建桌面快捷方式 - 使用可执行文件的内嵌图标
-        CreateShortCut '\$DESKTOP\\\\Sunshine.lnk' \
-            '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' '--shortcut' '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' 0
-
-        ; 创建桌面快捷方式 - GUI管理工具
-        CreateShortCut '\$DESKTOP\\\\Sunshine GUI.lnk' \
-            '\$INSTDIR\\\\assets\\\\gui\\\\sunshine-gui.exe' '' '\$INSTDIR\\\\assets\\\\gui\\\\sunshine-gui.exe' 0
         ")
 
 set(CPACK_NSIS_DELETE_ICONS_EXTRA
