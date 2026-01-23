@@ -3,6 +3,64 @@
 
 set(CPACK_NSIS_INSTALLED_ICON_NAME "${PROJECT__DIR}\\\\${PROJECT_EXE}")
 
+# 由于 CPack 的 NSIS 模板限制，我们无法直接修改 .onInit 函数
+# 但可以通过以下方式实现：
+# 通过 MUI_PAGE_CUSTOMFUNCTION_PRE 在目录页面显示前读取注册表
+#
+# 注意：CPACK_NSIS_INSTALLER_MUI_ICON_CODE 是在页面定义之前的钩子
+# 我们用它来定义自定义函数，并设置 MUI_PAGE_CUSTOMFUNCTION_PRE
+
+set(CPACK_NSIS_INSTALLER_MUI_ICON_CODE "
+; 定义安装程序图标
+!define MUI_ICON \\\"${CMAKE_SOURCE_DIR}/sunshine.ico\\\"
+!define MUI_UNICON \\\"${CMAKE_SOURCE_DIR}/sunshine.ico\\\"
+
+; 定义在目录页面显示前执行的函数
+!define MUI_PAGE_CUSTOMFUNCTION_PRE PreDirectoryPage
+
+; 从注册表读取之前的安装路径
+; 参考 CPack NSIS 模板中 .onInit 的 ENABLE_UNINSTALL_BEFORE_INSTALL 实现
+
+Function PreDirectoryPage
+    ; 只在默认安装目录时才尝试读取注册表
+    StrCmp $IS_DEFAULT_INSTALLDIR '1' 0 SkipRegRead
+
+    Push $0
+    Push $1
+    Push $2
+    SetRegView 64
+
+    ; 从 NSIS 卸载注册表读取 UninstallString
+    ReadRegStr $0 HKLM 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\Sunshine' 'UninstallString'
+    StrCmp $0 '' DoneRegRead 0
+
+    ; 移除引号
+    StrCpy $1 $0 1 0       ; 复制第一个字符
+    StrCmp $1 '$$\\\"' 0 +2  ; 如果是引号
+    StrCpy $0 $0 '' 1      ; 移除第一个字符
+
+    StrCpy $1 $0 1 -1      ; 复制最后一个字符
+    StrCmp $1 '$$\\\"' 0 +2  ; 如果是引号
+    StrCpy $0 $0 -1        ; 移除最后一个字符
+
+    ; 移除 \\\\Uninstall.exe 得到安装路径
+    StrLen $2 '\\\\Uninstall.exe'
+    StrCpy $0 $0 -$2
+
+    ; 验证路径存在
+    IfFileExists '$0\\\\*.*' 0 DoneRegRead
+    StrCpy $INSTDIR $0
+    StrCpy $IS_DEFAULT_INSTALLDIR '0'
+
+    DoneRegRead:
+    Pop $2
+    Pop $1
+    Pop $0
+
+    SkipRegRead:
+FunctionEnd
+")
+
 # ==============================================================================
 # File Conflict Prevention - 在文件解压前停止进程
 # ==============================================================================
