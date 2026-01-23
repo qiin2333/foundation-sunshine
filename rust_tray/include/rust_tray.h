@@ -11,29 +11,25 @@ extern "C" {
 #endif
 
 /**
- * @brief Menu action identifiers (must match Rust MenuAction enum)
+ * @brief Menu action ID strings (defined in Rust menu_items.rs)
+ * These match the IDs used in the Rust tray menu system.
  */
-typedef enum {
-    TRAY_ACTION_OPEN_UI = 1,
-    // VDD submenu actions
-    TRAY_ACTION_VDD_CREATE = 2,
-    TRAY_ACTION_VDD_CLOSE = 3,
-    TRAY_ACTION_VDD_PERSISTENT = 4,
-    // Reserved: 5, 6, 7 (removed import/export/reset config)
-    TRAY_ACTION_CLOSE_APP = 8,
-    // Language actions
-    TRAY_ACTION_LANGUAGE_CHINESE = 9,
-    TRAY_ACTION_LANGUAGE_ENGLISH = 10,
-    TRAY_ACTION_LANGUAGE_JAPANESE = 11,
-    TRAY_ACTION_STAR_PROJECT = 12,
-    // Visit Project actions
-    TRAY_ACTION_VISIT_PROJECT_SUNSHINE = 13,
-    TRAY_ACTION_VISIT_PROJECT_MOONLIGHT = 14,
-    TRAY_ACTION_RESET_DISPLAY_DEVICE_CONFIG = 15,
-    TRAY_ACTION_RESTART = 16,
-    TRAY_ACTION_QUIT = 17,
-    TRAY_ACTION_NOTIFICATION_CLICKED = 18,
-} TrayAction;
+#define TRAY_ACTION_OPEN_SUNSHINE       "open_sunshine"
+#define TRAY_ACTION_VDD_CREATE          "vdd_create"
+#define TRAY_ACTION_VDD_CLOSE           "vdd_close"
+#define TRAY_ACTION_VDD_PERSISTENT      "vdd_persistent"
+#define TRAY_ACTION_CLOSE_APP           "close_app"
+#define TRAY_ACTION_RESET_DISPLAY       "reset_display"
+#define TRAY_ACTION_LANG_CHINESE        "lang_chinese"
+#define TRAY_ACTION_LANG_ENGLISH        "lang_english"
+#define TRAY_ACTION_LANG_JAPANESE       "lang_japanese"
+#define TRAY_ACTION_STAR_PROJECT        "star_project"
+#define TRAY_ACTION_VISIT_SUNSHINE      "visit_sunshine"
+#define TRAY_ACTION_VISIT_MOONLIGHT     "visit_moonlight"
+#define TRAY_ACTION_RESTART             "restart"
+#define TRAY_ACTION_QUIT                "quit"
+// Special action for notification click (not a menu item)
+#define TRAY_ACTION_NOTIFICATION_CLICKED "notification_clicked"
 
 /**
  * @brief Icon types for tray_set_icon
@@ -47,9 +43,9 @@ typedef enum {
 
 /**
  * @brief Callback function type for menu actions
- * @param action The action identifier
+ * @param action_id The action identifier string (null-terminated)
  */
-typedef void (*TrayActionCallback)(uint32_t action);
+typedef void (*TrayActionCallback)(const char* action_id);
 
 /**
  * @brief Initialize the tray with extended options

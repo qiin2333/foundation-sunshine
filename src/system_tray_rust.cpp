@@ -104,79 +104,69 @@ namespace system_tray {
   }
 
   /**
-   * @brief Handle tray actions from Rust
+   * @brief Handle tray actions from Rust (string-based)
    */
-  static void handle_tray_action(uint32_t action) {
-    switch (action) {
-      case TRAY_ACTION_OPEN_UI:
-        launch_ui();
-        break;
-
-      case TRAY_ACTION_VDD_CREATE:
-        BOOST_LOG(info) << "Creating VDD from system tray"sv;
-        if (!s_vdd_in_cooldown && !is_vdd_active()) {
-          if (display_device::session_t::get().toggle_display_power()) {
-            start_vdd_cooldown();
-          }
-        }
-        break;
-
-      case TRAY_ACTION_VDD_CLOSE:
-        BOOST_LOG(info) << "Closing VDD from system tray"sv;
-        if (!s_vdd_in_cooldown && is_vdd_active() && !config::video.vdd_keep_enabled) {
-          display_device::session_t::get().destroy_vdd_monitor();
+  static void handle_tray_action(const char* action_id) {
+    if (!action_id) return;
+    
+    std::string action(action_id);
+    
+    if (action == TRAY_ACTION_OPEN_SUNSHINE) {
+      launch_ui();
+    }
+    else if (action == TRAY_ACTION_VDD_CREATE) {
+      BOOST_LOG(info) << "Creating VDD from system tray"sv;
+      if (!s_vdd_in_cooldown && !is_vdd_active()) {
+        if (display_device::session_t::get().toggle_display_power()) {
           start_vdd_cooldown();
         }
-        break;
-
-      case TRAY_ACTION_VDD_PERSISTENT:
-        BOOST_LOG(info) << "Toggling VDD persistent mode"sv;
-        config::video.vdd_keep_enabled = !config::video.vdd_keep_enabled;
-        config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
-        update_vdd_menu_state();
-        break;
-
-      case TRAY_ACTION_STAR_PROJECT:
-        platf::open_url_in_browser("https://sunshine-foundation.vercel.app/");
-        break;
-
-      case TRAY_ACTION_VISIT_PROJECT_SUNSHINE:
-        platf::open_url_in_browser("https://github.com/qiin2333/Sunshine-Foundation");
-        break;
-
-      case TRAY_ACTION_VISIT_PROJECT_MOONLIGHT:
-        platf::open_url_in_browser("https://github.com/qiin2333/moonlight-vplus");
-        break;
-
-      case TRAY_ACTION_RESET_DISPLAY_DEVICE_CONFIG:
-        BOOST_LOG(info) << "Resetting display device config"sv;
-        display_device::session_t::get().reset_persistence();
-        break;
-
-      case TRAY_ACTION_RESTART:
-        BOOST_LOG(info) << "Restarting from system tray"sv;
-        platf::restart();
-        break;
-
-      case TRAY_ACTION_QUIT:
-        BOOST_LOG(info) << "Quitting from system tray"sv;
-#ifdef _WIN32
-        terminate_gui_processes();
-        if (GetConsoleWindow() == NULL) {
-            lifetime::exit_sunshine(ERROR_SHUTDOWN_IN_PROGRESS, true);
-        }
-        else {
-            lifetime::exit_sunshine(0, true);
-        }
-#else
-        lifetime::exit_sunshine(0, true);
-#endif
-        break;
-
-      default:
-        // Other actions are handled entirely in Rust
-        break;
+      }
     }
+    else if (action == TRAY_ACTION_VDD_CLOSE) {
+      BOOST_LOG(info) << "Closing VDD from system tray"sv;
+      if (!s_vdd_in_cooldown && is_vdd_active() && !config::video.vdd_keep_enabled) {
+        display_device::session_t::get().destroy_vdd_monitor();
+        start_vdd_cooldown();
+      }
+    }
+    else if (action == TRAY_ACTION_VDD_PERSISTENT) {
+      BOOST_LOG(info) << "Toggling VDD persistent mode"sv;
+      config::video.vdd_keep_enabled = !config::video.vdd_keep_enabled;
+      config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
+      update_vdd_menu_state();
+    }
+    else if (action == TRAY_ACTION_STAR_PROJECT) {
+      platf::open_url_in_browser("https://sunshine-foundation.vercel.app/");
+    }
+    else if (action == TRAY_ACTION_VISIT_SUNSHINE) {
+      platf::open_url_in_browser("https://github.com/qiin2333/Sunshine-Foundation");
+    }
+    else if (action == TRAY_ACTION_VISIT_MOONLIGHT) {
+      platf::open_url_in_browser("https://github.com/qiin2333/moonlight-vplus");
+    }
+    else if (action == TRAY_ACTION_RESET_DISPLAY) {
+      BOOST_LOG(info) << "Resetting display device config"sv;
+      display_device::session_t::get().reset_persistence();
+    }
+    else if (action == TRAY_ACTION_RESTART) {
+      BOOST_LOG(info) << "Restarting from system tray"sv;
+      platf::restart();
+    }
+    else if (action == TRAY_ACTION_QUIT) {
+      BOOST_LOG(info) << "Quitting from system tray"sv;
+#ifdef _WIN32
+      terminate_gui_processes();
+      if (GetConsoleWindow() == NULL) {
+          lifetime::exit_sunshine(ERROR_SHUTDOWN_IN_PROGRESS, true);
+      }
+      else {
+          lifetime::exit_sunshine(0, true);
+      }
+#else
+      lifetime::exit_sunshine(0, true);
+#endif
+    }
+    // Other actions (language, close_app) are handled entirely in Rust
   }
 
   void terminate_gui_processes() {

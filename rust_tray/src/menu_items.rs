@@ -292,30 +292,7 @@ pub fn execute_handler(item_id: &str) -> (bool, bool) {
     (false, false)
 }
 
-/// Map item ID to MenuAction for C++ callback
+/// Trigger C++ callback with action ID
 fn trigger_action_for_id(item_id: &str) {
-    use crate::actions::MenuAction;
-    use ids::*;
-    
-    let action = match item_id {
-        OPEN_SUNSHINE => Some(MenuAction::OpenUI),
-        VDD_CREATE => Some(MenuAction::VddCreate),
-        VDD_CLOSE => Some(MenuAction::VddClose),
-        VDD_PERSISTENT => Some(MenuAction::VddPersistent),
-        CLOSE_APP => Some(MenuAction::CloseApp),
-        LANG_CHINESE => Some(MenuAction::LanguageChinese),
-        LANG_ENGLISH => Some(MenuAction::LanguageEnglish),
-        LANG_JAPANESE => Some(MenuAction::LanguageJapanese),
-        STAR_PROJECT => Some(MenuAction::StarProject),
-        VISIT_SUNSHINE => Some(MenuAction::VisitProjectSunshine),
-        VISIT_MOONLIGHT => Some(MenuAction::VisitProjectMoonlight),
-        RESET_DISPLAY => Some(MenuAction::ResetDisplayDeviceConfig),
-        RESTART => Some(MenuAction::Restart),
-        QUIT => Some(MenuAction::Quit),
-        _ => None,
-    };
-    
-    if let Some(action) = action {
-        trigger_action(action);
-    }
+    trigger_action(item_id);
 }
