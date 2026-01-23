@@ -163,47 +163,27 @@ pub mod ids {
 mod handlers {
     use super::*;
 
-    pub fn open_sunshine() {
-        // Handled by C++ callback
-    }
-
-    pub fn vdd_create() {
-        // VDD create/close validation is handled by C++ side (cooldown + state check)
-        // C++ will only call into Rust after validation passes
-    }
-
-    pub fn vdd_close() {
-        // VDD create/close validation is handled by C++ side (cooldown + state check)
-        // C++ will only call into Rust after validation passes
-    }
-
-    pub fn vdd_persistent() {
-        // VDD persistent toggle - C++ handles the confirmation and config save
-        // The Rust side only receives the menu click event
-    }
-
+    /// 关闭应用前显示确认对话框
     pub fn close_app() {
-        // Show confirmation dialog before closing app
         if !config::show_confirm_dialog(
             get_string(StringKey::CloseAppConfirmTitle),
             get_string(StringKey::CloseAppConfirmMsg),
         ) {
             return;
         }
-        // C++ will handle the actual close
     }
 
+    /// 重置显示配置前显示确认对话框
     pub fn reset_display() {
-        // Show confirmation dialog before resetting display config
         if !config::show_confirm_dialog(
             get_string(StringKey::ResetDisplayConfirmTitle),
             get_string(StringKey::ResetDisplayConfirmMsg),
         ) {
             return;
         }
-        // C++ will handle the actual reset
     }
 
+    /// 切换语言并保存设置
     pub fn lang_chinese() {
         set_locale_str("zh");
         let _ = config::save_tray_locale("zh");
@@ -219,28 +199,14 @@ mod handlers {
         let _ = config::save_tray_locale("ja");
     }
 
-    pub fn star_project() {
-    }
-
-    pub fn visit_sunshine() {
-    }
-
-    pub fn visit_moonlight() {
-    }
-
-    pub fn restart() {
-        // Handled by C++ callback directly (no confirmation needed)
-    }
-
+    /// 退出前显示确认对话框
     pub fn quit() {
-        // Show confirmation dialog before quitting
         if !config::show_confirm_dialog(
             get_string(StringKey::QuitTitle),
             get_string(StringKey::QuitMessage),
         ) {
             return;
         }
-        // C++ will handle the actual quit
     }
 }
 
@@ -255,19 +221,15 @@ pub fn get_all_items() -> Vec<MenuItemInfo> {
     
     vec![
         // ====== Top Level Items ======
-        MenuItemInfo::action(OPEN_SUNSHINE, StringKey::OpenSunshine, None, 100)
-            .with_handler(handlers::open_sunshine),
+        MenuItemInfo::action(OPEN_SUNSHINE, StringKey::OpenSunshine, None, 100),
         
         MenuItemInfo::separator(SEP_1, None, 200),
 
         // ====== VDD Submenu ======
         MenuItemInfo::submenu(VDD_SUBMENU, StringKey::VddBaseDisplay, None, 300),
-        MenuItemInfo::check(VDD_CREATE, StringKey::VddCreate, Some(VDD_SUBMENU), false, 310)
-            .with_handler(handlers::vdd_create),
-        MenuItemInfo::check(VDD_CLOSE, StringKey::VddClose, Some(VDD_SUBMENU), false, 320)
-            .with_handler(handlers::vdd_close),
-        MenuItemInfo::check(VDD_PERSISTENT, StringKey::VddPersistent, Some(VDD_SUBMENU), false, 330)
-            .with_handler(handlers::vdd_persistent),
+        MenuItemInfo::check(VDD_CREATE, StringKey::VddCreate, Some(VDD_SUBMENU), false, 310),
+        MenuItemInfo::check(VDD_CLOSE, StringKey::VddClose, Some(VDD_SUBMENU), false, 320),
+        MenuItemInfo::check(VDD_PERSISTENT, StringKey::VddPersistent, Some(VDD_SUBMENU), false, 330),
 
         // ====== Advanced Settings Submenu ======
         MenuItemInfo::submenu(ADVANCED_SUBMENU, StringKey::AdvancedSettings, None, 400),
@@ -293,21 +255,17 @@ pub fn get_all_items() -> Vec<MenuItemInfo> {
         MenuItemInfo::separator(SEP_3, None, 700),
 
         // ====== Star Project ======
-        MenuItemInfo::action(STAR_PROJECT, StringKey::StarProject, None, 800)
-            .with_handler(handlers::star_project),
+        MenuItemInfo::action(STAR_PROJECT, StringKey::StarProject, None, 800),
 
         // ====== Visit Project Submenu ======
         MenuItemInfo::submenu(VISIT_SUBMENU, StringKey::VisitProject, None, 900),
-        MenuItemInfo::action(VISIT_SUNSHINE, StringKey::VisitProjectSunshine, Some(VISIT_SUBMENU), 910)
-            .with_handler(handlers::visit_sunshine),
-        MenuItemInfo::action(VISIT_MOONLIGHT, StringKey::VisitProjectMoonlight, Some(VISIT_SUBMENU), 920)
-            .with_handler(handlers::visit_moonlight),
+        MenuItemInfo::action(VISIT_SUNSHINE, StringKey::VisitProjectSunshine, Some(VISIT_SUBMENU), 910),
+        MenuItemInfo::action(VISIT_MOONLIGHT, StringKey::VisitProjectMoonlight, Some(VISIT_SUBMENU), 920),
 
         MenuItemInfo::separator(SEP_4, None, 1000),
 
         // ====== Restart & Quit ======
-        MenuItemInfo::action(RESTART, StringKey::Restart, None, 1100)
-            .with_handler(handlers::restart),
+        MenuItemInfo::action(RESTART, StringKey::Restart, None, 1100),
         MenuItemInfo::action(QUIT, StringKey::Quit, None, 1200)
             .with_handler(handlers::quit),
     ]
@@ -321,12 +279,14 @@ pub fn execute_handler(item_id: &str) -> (bool, bool) {
     if let Some(item) = items.iter().find(|i| i.id == item_id) {
         let needs_rebuild = item.rebuild_menu;
         
+        // Execute Rust handler if present (for dialogs, language changes, etc.)
         if let Some(handler) = item.handler {
             handler();
-            // Also trigger the C++ callback for items that need it
-            trigger_action_for_id(item_id);
-            return (true, needs_rebuild);
         }
+        
+        // Always trigger C++ callback for action items
+        trigger_action_for_id(item_id);
+        return (true, needs_rebuild);
     }
     
     (false, false)
