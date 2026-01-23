@@ -26,38 +26,58 @@ Function PreDirectoryPage
     StrCmp $IS_DEFAULT_INSTALLDIR '1' 0 SkipRegRead
 
     Push $0
-    Push $1
-    Push $2
     SetRegView 64
 
     ; 从 NSIS 卸载注册表读取 UninstallString
-    ReadRegStr $0 HKLM 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\Sunshine' 'UninstallString'
+    ReadRegStr $0 HKLM 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\Sunshine' 'UninstallString'
     StrCmp $0 '' DoneRegRead 0
 
-    ; 移除引号
-    StrCpy $1 $0 1 0       ; 复制第一个字符
-    StrCmp $1 '$$\\\"' 0 +2  ; 如果是引号
-    StrCpy $0 $0 '' 1      ; 移除第一个字符
+    ; 移除引号（如果有）
+    StrCpy $0 $0 '' 1   ; 移除开头的引号
+    StrLen $1 $0
+    IntOp $1 $1 - 1
+    StrCpy $0 $0 $1     ; 移除结尾的引号
 
-    StrCpy $1 $0 1 -1      ; 复制最后一个字符
-    StrCmp $1 '$$\\\"' 0 +2  ; 如果是引号
-    StrCpy $0 $0 -1        ; 移除最后一个字符
+    ; 获取父目录（移除 \\\\Uninstall.exe）
+    Push $0
+    Call GetParent
+    Pop $0
+    StrCmp $0 '' DoneRegRead 0
+    IfFileExists '$0\\\\*.*' SetPath DoneRegRead
 
-    ; 移除 \\\\Uninstall.exe 得到安装路径
-    StrLen $2 '\\\\Uninstall.exe'
-    StrCpy $0 $0 -$2
-
-    ; 验证路径存在
-    IfFileExists '$0\\\\*.*' 0 DoneRegRead
+    SetPath:
     StrCpy $INSTDIR $0
     StrCpy $IS_DEFAULT_INSTALLDIR '0'
 
     DoneRegRead:
-    Pop $2
-    Pop $1
     Pop $0
 
     SkipRegRead:
+FunctionEnd
+
+; 辅助函数：获取路径的父目录
+Function GetParent
+    Exch $0
+    Push $1
+    Push $2
+
+    StrLen $1 $0
+    IntOp $1 $1 - 1
+
+    loop:
+        IntOp $1 $1 - 1
+        IntCmp $1 0 done done
+        StrCpy $2 $0 1 $1
+        StrCmp $2 '\\\\' found
+        Goto loop
+
+    found:
+        StrCpy $0 $0 $1
+
+    done:
+        Pop $2
+        Pop $1
+        Exch $0
 FunctionEnd
 ")
 
