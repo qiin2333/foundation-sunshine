@@ -219,6 +219,13 @@ SET(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\autostart-service.bat\\\"'
         
         DetailPrint '✅ 安装完成！'
+
+        ; 仅在非静默安装时弹出GUI
+        IfSilent skip_post_install
+        DetailPrint '正在启动配置界面...'
+        Exec '\\\"$INSTDIR\\\\assets\\\\gui\\\\sunshine-gui.exe\\\"'
+        skip_post_install:
+
         NoController:
         ")
 
