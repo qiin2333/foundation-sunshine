@@ -46,6 +46,7 @@
 #include "file_handler.h"
 #include "logging.h"
 #include "platform/common.h"
+#include "process.h"
 #include "system_tray.h"
 #include "version.h"
 
@@ -143,6 +144,10 @@ namespace system_tray {
     }
     else if (action == TRAY_ACTION_LANG_JAPANESE) {
       config::update_config({{"tray_locale", "ja"}});
+    }
+    else if (action == TRAY_ACTION_CLOSE_APP) {
+      BOOST_LOG(info) << "Closing application from system tray"sv;
+      proc::proc.terminate();
     }
     else if (action == TRAY_ACTION_STAR_PROJECT) {
       platf::open_url_in_browser("https://sunshine-foundation.vercel.app/");

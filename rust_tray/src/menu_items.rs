@@ -12,7 +12,8 @@ use crate::actions::trigger_action;
 use crate::dialogs;
 
 /// Menu item handler function type
-pub type MenuHandler = fn();
+/// Returns true if action should proceed, false to cancel
+pub type MenuHandler = fn() -> bool;
 
 /// Menu item type
 #[derive(Clone, Copy, PartialEq)]
@@ -164,46 +165,43 @@ mod handlers {
     use super::*;
 
     /// 关闭应用前显示确认对话框
-    pub fn close_app() {
-        if !dialogs::show_confirm_dialog(
+    pub fn close_app() -> bool {
+        dialogs::show_confirm_dialog(
             get_string(StringKey::CloseAppConfirmTitle),
             get_string(StringKey::CloseAppConfirmMsg),
-        ) {
-            return;
-        }
+        )
     }
 
     /// 重置显示配置前显示确认对话框
-    pub fn reset_display() {
-        if !dialogs::show_confirm_dialog(
+    pub fn reset_display() -> bool {
+        dialogs::show_confirm_dialog(
             get_string(StringKey::ResetDisplayConfirmTitle),
             get_string(StringKey::ResetDisplayConfirmMsg),
-        ) {
-            return;
-        }
+        )
     }
 
     /// 切换语言（只更新 UI，配置保存由 C++ 处理）
-    pub fn lang_chinese() {
+    pub fn lang_chinese() -> bool {
         set_locale_str("zh");
+        true
     }
 
-    pub fn lang_english() {
+    pub fn lang_english() -> bool {
         set_locale_str("en");
+        true
     }
 
-    pub fn lang_japanese() {
+    pub fn lang_japanese() -> bool {
         set_locale_str("ja");
+        true
     }
 
     /// 退出前显示确认对话框
-    pub fn quit() {
-        if !dialogs::show_confirm_dialog(
+    pub fn quit() -> bool {
+        dialogs::show_confirm_dialog(
             get_string(StringKey::QuitTitle),
             get_string(StringKey::QuitMessage),
-        ) {
-            return;
-        }
+        )
     }
 }
 
@@ -277,11 +275,14 @@ pub fn execute_handler(item_id: &str) -> (bool, bool) {
         let needs_rebuild = item.rebuild_menu;
         
         // Execute Rust handler if present (for dialogs, language changes, etc.)
+        // Handler returns false to cancel the action (e.g., user clicked "No" on dialog)
         if let Some(handler) = item.handler {
-            handler();
+            if !handler() {
+                return (true, false);  // Handled but cancelled, no rebuild
+            }
         }
         
-        // Always trigger C++ callback for action items
+        // Trigger C++ callback for action items
         trigger_action_for_id(item_id);
         return (true, needs_rebuild);
     }
