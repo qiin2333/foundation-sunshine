@@ -15,7 +15,7 @@
 
 pub mod i18n;
 pub mod actions;
-pub mod config;
+pub mod dialogs;
 pub mod menu;
 pub mod menu_items;
 pub mod notification;
@@ -58,14 +58,6 @@ static CURRENT_ICON_TYPE: AtomicI32 = AtomicI32::new(0);
 
 /// Cached DPI value to detect DPI changes
 static CACHED_DPI_SIZE: AtomicI32 = AtomicI32::new(0);
-
-/// Config file path storage (set from C++)
-static CONFIG_FILE_PATH: OnceCell<String> = OnceCell::new();
-
-/// Get the config file path (set from C++)
-pub fn get_config_file_path_from_cpp() -> Option<&'static str> {
-    CONFIG_FILE_PATH.get().map(|s| s.as_str())
-}
 
 /// Icon paths storage
 static ICON_PATHS: OnceCell<IconPaths> = OnceCell::new();
@@ -245,7 +237,6 @@ fn update_menu_texts() {
 /// * `icon_locked` - Path to locked icon
 /// * `tooltip` - Tooltip text
 /// * `locale` - Initial locale (e.g., "zh", "en", "ja")
-/// * `config_file` - Path to the Sunshine configuration file (sunshine.conf)
 /// * `callback` - Callback function for menu actions
 /// 
 /// # Returns
@@ -258,14 +249,8 @@ pub unsafe extern "C" fn tray_init_ex(
     icon_locked: *const c_char,
     tooltip: *const c_char,
     locale: *const c_char,
-    config_file: *const c_char,
     callback: ActionCallback,
 ) -> c_int {
-    // Store config file path (from C++)
-    if let Some(cfg_path) = c_str_to_string(config_file) {
-        let _ = CONFIG_FILE_PATH.set(cfg_path);
-    }
-
     // Store icon paths
     let normal = c_str_to_string(icon_normal).unwrap_or_default();
     let playing = c_str_to_string(icon_playing).unwrap_or_default();

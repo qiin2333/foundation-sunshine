@@ -55,7 +55,6 @@ typedef void (*TrayActionCallback)(const char* action_id);
  * @param icon_locked Path to locked icon
  * @param tooltip Tooltip text
  * @param locale Initial locale (e.g., "zh", "en", "ja")
- * @param config_file Path to the Sunshine configuration file (sunshine.conf)
  * @param callback Callback function for menu actions
  * @return 0 on success, -1 on error
  */
@@ -66,7 +65,6 @@ int tray_init_ex(
     const char* icon_locked,
     const char* tooltip,
     const char* locale,
-    const char* config_file,
     TrayActionCallback callback
 );
 

@@ -135,6 +135,15 @@ namespace system_tray {
       config::update_config({{"vdd_keep_enabled", config::video.vdd_keep_enabled ? "true" : "false"}});
       update_vdd_menu_state();
     }
+    else if (action == TRAY_ACTION_LANG_CHINESE) {
+      config::update_config({{"tray_locale", "zh"}});
+    }
+    else if (action == TRAY_ACTION_LANG_ENGLISH) {
+      config::update_config({{"tray_locale", "en"}});
+    }
+    else if (action == TRAY_ACTION_LANG_JAPANESE) {
+      config::update_config({{"tray_locale", "ja"}});
+    }
     else if (action == TRAY_ACTION_STAR_PROJECT) {
       platf::open_url_in_browser("https://sunshine-foundation.vercel.app/");
     }
@@ -220,7 +229,6 @@ namespace system_tray {
       ICON_PATH_LOCKED,
       tooltip.c_str(),
       locale.c_str(),
-      config::sunshine.config_file.c_str(),
       handle_tray_action
     );
 

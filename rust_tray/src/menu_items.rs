@@ -9,7 +9,7 @@
 
 use crate::i18n::{StringKey, get_string, set_locale_str};
 use crate::actions::trigger_action;
-use crate::config;
+use crate::dialogs;
 
 /// Menu item handler function type
 pub type MenuHandler = fn();
@@ -165,7 +165,7 @@ mod handlers {
 
     /// 关闭应用前显示确认对话框
     pub fn close_app() {
-        if !config::show_confirm_dialog(
+        if !dialogs::show_confirm_dialog(
             get_string(StringKey::CloseAppConfirmTitle),
             get_string(StringKey::CloseAppConfirmMsg),
         ) {
@@ -175,7 +175,7 @@ mod handlers {
 
     /// 重置显示配置前显示确认对话框
     pub fn reset_display() {
-        if !config::show_confirm_dialog(
+        if !dialogs::show_confirm_dialog(
             get_string(StringKey::ResetDisplayConfirmTitle),
             get_string(StringKey::ResetDisplayConfirmMsg),
         ) {
@@ -183,25 +183,22 @@ mod handlers {
         }
     }
 
-    /// 切换语言并保存设置
+    /// 切换语言（只更新 UI，配置保存由 C++ 处理）
     pub fn lang_chinese() {
         set_locale_str("zh");
-        let _ = config::save_tray_locale("zh");
     }
 
     pub fn lang_english() {
         set_locale_str("en");
-        let _ = config::save_tray_locale("en");
     }
 
     pub fn lang_japanese() {
         set_locale_str("ja");
-        let _ = config::save_tray_locale("ja");
     }
 
     /// 退出前显示确认对话框
     pub fn quit() {
-        if !config::show_confirm_dialog(
+        if !dialogs::show_confirm_dialog(
             get_string(StringKey::QuitTitle),
             get_string(StringKey::QuitMessage),
         ) {
