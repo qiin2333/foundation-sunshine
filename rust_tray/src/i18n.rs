@@ -44,9 +44,6 @@ pub enum StringKey {
     VddPersistentConfirmMsg,
     // Advanced Settings submenu
     AdvancedSettings,
-    ImportConfig,
-    ExportConfig,
-    ResetToDefault,
     CloseApp,
     CloseAppConfirmTitle,
     CloseAppConfirmMsg,
@@ -80,26 +77,6 @@ pub enum StringKey {
     QuitTitle,
     QuitMessage,
     ErrorTitle,
-    ErrorNoUserSession,
-    ImportSuccessTitle,
-    ImportSuccessMsg,
-    ImportErrorTitle,
-    ImportErrorWrite,
-    ImportErrorRead,
-    ImportErrorException,
-    ExportSuccessTitle,
-    ExportSuccessMsg,
-    ExportErrorTitle,
-    ExportErrorWrite,
-    ExportErrorNoConfig,
-    ExportErrorException,
-    ResetConfirmTitle,
-    ResetConfirmMsg,
-    ResetSuccessTitle,
-    ResetSuccessMsg,
-    ResetErrorTitle,
-    ResetErrorMsg,
-    ResetErrorException,
 }
 
 /// Current locale storage
@@ -110,33 +87,30 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     let mut m = HashMap::new();
     
     // English translations
-    m.insert((Locale::English, StringKey::OpenSunshine), "Open Sunshine");
+    m.insert((Locale::English, StringKey::OpenSunshine), "Open GUI");
     // VDD submenu
     m.insert((Locale::English, StringKey::VddBaseDisplay), "Foundation Display");
-    m.insert((Locale::English, StringKey::VddCreate), "Create");
-    m.insert((Locale::English, StringKey::VddClose), "Close");
+    m.insert((Locale::English, StringKey::VddCreate), "Create Virtual Display");
+    m.insert((Locale::English, StringKey::VddClose), "Close Virtual Display");
     m.insert((Locale::English, StringKey::VddPersistent), "Keep Enabled");
-    m.insert((Locale::English, StringKey::VddPersistentConfirmTitle), "Enable Keep VDD Mode");
-    m.insert((Locale::English, StringKey::VddPersistentConfirmMsg), "Enabling this mode will keep the virtual display active at all times.\n\nAre you sure you want to enable it?");
+    m.insert((Locale::English, StringKey::VddPersistentConfirmTitle), "Keep Virtual Display Enabled");
+    m.insert((Locale::English, StringKey::VddPersistentConfirmMsg), "By enabling this option, the virtual display will NOT be closed after you stop streaming.\n\nDo you want to enable this feature?");
     // Advanced Settings submenu
     m.insert((Locale::English, StringKey::AdvancedSettings), "Advanced Settings");
-    m.insert((Locale::English, StringKey::ImportConfig), "Import Config");
-    m.insert((Locale::English, StringKey::ExportConfig), "Export Config");
-    m.insert((Locale::English, StringKey::ResetToDefault), "Reset to Default");
     m.insert((Locale::English, StringKey::CloseApp), "Clear Cache");
     m.insert((Locale::English, StringKey::CloseAppConfirmTitle), "Clear Cache");
-    m.insert((Locale::English, StringKey::CloseAppConfirmMsg), "This will terminate the current streaming application.\n\nAre you sure you want to continue?");
+    m.insert((Locale::English, StringKey::CloseAppConfirmMsg), "This operation will clear streaming state, may terminate the streaming application, and clean up related processes and state. Do you want to continue?");
     m.insert((Locale::English, StringKey::Language), "Language");
     m.insert((Locale::English, StringKey::Chinese), "中文");
     m.insert((Locale::English, StringKey::English), "English");
     m.insert((Locale::English, StringKey::Japanese), "日本語");
-    m.insert((Locale::English, StringKey::StarProject), "Star Project");
+    m.insert((Locale::English, StringKey::StarProject), "Visit Website");
     m.insert((Locale::English, StringKey::VisitProject), "Visit Project");
-    m.insert((Locale::English, StringKey::VisitProjectSunshine), "Sunshine-Foundation");
-    m.insert((Locale::English, StringKey::VisitProjectMoonlight), "Moonlight-vplus");
-    m.insert((Locale::English, StringKey::ResetDisplayDeviceConfig), "Reset Display Memory");
-    m.insert((Locale::English, StringKey::ResetDisplayConfirmTitle), "Reset Display Configuration");
-    m.insert((Locale::English, StringKey::ResetDisplayConfirmMsg), "This will reset all display device configuration.\n\nAre you sure you want to continue?");
+    m.insert((Locale::English, StringKey::VisitProjectSunshine), "Sunshine");
+    m.insert((Locale::English, StringKey::VisitProjectMoonlight), "Moonlight");
+    m.insert((Locale::English, StringKey::ResetDisplayDeviceConfig), "Reset Display");
+    m.insert((Locale::English, StringKey::ResetDisplayConfirmTitle), "Reset Display");
+    m.insert((Locale::English, StringKey::ResetDisplayConfirmMsg), "Are you sure you want to reset display device memory? This action cannot be undone.");
     m.insert((Locale::English, StringKey::Restart), "Restart");
     m.insert((Locale::English, StringKey::Quit), "Quit");
     m.insert((Locale::English, StringKey::StreamStarted), "Stream Started");
@@ -150,55 +124,32 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::English, StringKey::QuitTitle), "Wait! Don't Leave Me! T_T");
     m.insert((Locale::English, StringKey::QuitMessage), "Nooo! You can't just quit like that!\nAre you really REALLY sure you want to leave?\nI'll miss you... but okay, if you must...\n\n(This will also close the Sunshine GUI application.)");
     m.insert((Locale::English, StringKey::ErrorTitle), "Error");
-    m.insert((Locale::English, StringKey::ErrorNoUserSession), "Cannot open file dialog: No active user session found.");
-    m.insert((Locale::English, StringKey::ImportSuccessTitle), "Import Success");
-    m.insert((Locale::English, StringKey::ImportSuccessMsg), "Configuration imported successfully!\nPlease restart Sunshine to apply changes.");
-    m.insert((Locale::English, StringKey::ImportErrorTitle), "Import Error");
-    m.insert((Locale::English, StringKey::ImportErrorWrite), "Failed to import configuration file.");
-    m.insert((Locale::English, StringKey::ImportErrorRead), "Failed to read the selected configuration file.");
-    m.insert((Locale::English, StringKey::ImportErrorException), "An error occurred while importing configuration.");
-    m.insert((Locale::English, StringKey::ExportSuccessTitle), "Export Success");
-    m.insert((Locale::English, StringKey::ExportSuccessMsg), "Configuration exported successfully!");
-    m.insert((Locale::English, StringKey::ExportErrorTitle), "Export Error");
-    m.insert((Locale::English, StringKey::ExportErrorWrite), "Failed to export configuration file.");
-    m.insert((Locale::English, StringKey::ExportErrorNoConfig), "No configuration found to export.");
-    m.insert((Locale::English, StringKey::ExportErrorException), "An error occurred while exporting configuration.");
-    m.insert((Locale::English, StringKey::ResetConfirmTitle), "Reset Configuration");
-    m.insert((Locale::English, StringKey::ResetConfirmMsg), "This will reset all configuration to default values.\nThis action cannot be undone.\n\nDo you want to continue?");
-    m.insert((Locale::English, StringKey::ResetSuccessTitle), "Reset Success");
-    m.insert((Locale::English, StringKey::ResetSuccessMsg), "Configuration has been reset to default values.\nPlease restart Sunshine to apply changes.");
-    m.insert((Locale::English, StringKey::ResetErrorTitle), "Reset Error");
-    m.insert((Locale::English, StringKey::ResetErrorMsg), "Failed to reset configuration file.");
-    m.insert((Locale::English, StringKey::ResetErrorException), "An error occurred while resetting configuration.");
 
     // Chinese translations
-    m.insert((Locale::Chinese, StringKey::OpenSunshine), "打开 Sunshine");
+    m.insert((Locale::Chinese, StringKey::OpenSunshine), "打开基地面板");
     // VDD submenu
     m.insert((Locale::Chinese, StringKey::VddBaseDisplay), "基地显示器");
-    m.insert((Locale::Chinese, StringKey::VddCreate), "创建");
-    m.insert((Locale::Chinese, StringKey::VddClose), "关闭");
+    m.insert((Locale::Chinese, StringKey::VddCreate), "创建显示器");
+    m.insert((Locale::Chinese, StringKey::VddClose), "关闭显示器");
     m.insert((Locale::Chinese, StringKey::VddPersistent), "保持启用");
-    m.insert((Locale::Chinese, StringKey::VddPersistentConfirmTitle), "启用保持虚拟显示器模式");
-    m.insert((Locale::Chinese, StringKey::VddPersistentConfirmMsg), "启用此模式将使虚拟显示器始终保持活动状态。\n\n确定要启用吗？");
+    m.insert((Locale::Chinese, StringKey::VddPersistentConfirmTitle), "保持开启虚拟显示器");
+    m.insert((Locale::Chinese, StringKey::VddPersistentConfirmMsg), "启用此选项后，在串流结束后基地显示器将不会被自动关闭。\n\n确定要开启此功能吗？");
     // Advanced Settings submenu
     m.insert((Locale::Chinese, StringKey::AdvancedSettings), "高级设置");
-    m.insert((Locale::Chinese, StringKey::ImportConfig), "导入配置");
-    m.insert((Locale::Chinese, StringKey::ExportConfig), "导出配置");
-    m.insert((Locale::Chinese, StringKey::ResetToDefault), "恢复默认");
-    m.insert((Locale::Chinese, StringKey::CloseApp), "清理应用缓存");
-    m.insert((Locale::Chinese, StringKey::CloseAppConfirmTitle), "清理应用缓存");
-    m.insert((Locale::Chinese, StringKey::CloseAppConfirmMsg), "这将终止当前正在串流的应用程序。\n\n确定要继续吗？");
+    m.insert((Locale::Chinese, StringKey::CloseApp), "清理缓存");
+    m.insert((Locale::Chinese, StringKey::CloseAppConfirmTitle), "清理缓存");
+    m.insert((Locale::Chinese, StringKey::CloseAppConfirmMsg), "此操作将会清理串流状态，可能会终止串流应用，并清理相关进程和状态。是否继续？");
     m.insert((Locale::Chinese, StringKey::Language), "语言");
     m.insert((Locale::Chinese, StringKey::Chinese), "中文");
     m.insert((Locale::Chinese, StringKey::English), "English");
     m.insert((Locale::Chinese, StringKey::Japanese), "日本語");
-    m.insert((Locale::Chinese, StringKey::StarProject), "Star项目");
-    m.insert((Locale::Chinese, StringKey::VisitProject), "访问项目");
-    m.insert((Locale::Chinese, StringKey::VisitProjectSunshine), "Sunshine-Foundation");
-    m.insert((Locale::Chinese, StringKey::VisitProjectMoonlight), "Moonlight-vplus");
-    m.insert((Locale::Chinese, StringKey::ResetDisplayDeviceConfig), "重置显示器记忆");
-    m.insert((Locale::Chinese, StringKey::ResetDisplayConfirmTitle), "重置显示器配置");
-    m.insert((Locale::Chinese, StringKey::ResetDisplayConfirmMsg), "这将重置所有显示器设备配置。\n\n确定要继续吗？");
+    m.insert((Locale::Chinese, StringKey::StarProject), "访问官网");
+    m.insert((Locale::Chinese, StringKey::VisitProject), "访问项目地址");
+    m.insert((Locale::Chinese, StringKey::VisitProjectSunshine), "Sunshine");
+    m.insert((Locale::Chinese, StringKey::VisitProjectMoonlight), "Moonlight");
+    m.insert((Locale::Chinese, StringKey::ResetDisplayDeviceConfig), "重置显示器");
+    m.insert((Locale::Chinese, StringKey::ResetDisplayConfirmTitle), "重置显示器");
+    m.insert((Locale::Chinese, StringKey::ResetDisplayConfirmMsg), "确定要重置显示器设备记忆吗？此操作无法撤销。");
     m.insert((Locale::Chinese, StringKey::Restart), "重新启动");
     m.insert((Locale::Chinese, StringKey::Quit), "退出");
     m.insert((Locale::Chinese, StringKey::StreamStarted), "串流已开始");
@@ -212,55 +163,32 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::Chinese, StringKey::QuitTitle), "真的要退出吗");
     m.insert((Locale::Chinese, StringKey::QuitMessage), "你不能退出!\n那么想退吗? 真拿你没办法呢, 继续点一下吧~\n\n这将同时关闭Sunshine GUI应用程序。");
     m.insert((Locale::Chinese, StringKey::ErrorTitle), "错误");
-    m.insert((Locale::Chinese, StringKey::ErrorNoUserSession), "无法打开文件对话框：未找到活动的用户会话。");
-    m.insert((Locale::Chinese, StringKey::ImportSuccessTitle), "导入成功");
-    m.insert((Locale::Chinese, StringKey::ImportSuccessMsg), "配置已成功导入！\n请重新启动 Sunshine 以应用更改。");
-    m.insert((Locale::Chinese, StringKey::ImportErrorTitle), "导入失败");
-    m.insert((Locale::Chinese, StringKey::ImportErrorWrite), "无法写入配置文件。");
-    m.insert((Locale::Chinese, StringKey::ImportErrorRead), "无法读取所选的配置文件。");
-    m.insert((Locale::Chinese, StringKey::ImportErrorException), "导入配置时发生错误。");
-    m.insert((Locale::Chinese, StringKey::ExportSuccessTitle), "导出成功");
-    m.insert((Locale::Chinese, StringKey::ExportSuccessMsg), "配置已成功导出！");
-    m.insert((Locale::Chinese, StringKey::ExportErrorTitle), "导出失败");
-    m.insert((Locale::Chinese, StringKey::ExportErrorWrite), "无法导出配置文件。");
-    m.insert((Locale::Chinese, StringKey::ExportErrorNoConfig), "未找到可导出的配置。");
-    m.insert((Locale::Chinese, StringKey::ExportErrorException), "导出配置时发生错误。");
-    m.insert((Locale::Chinese, StringKey::ResetConfirmTitle), "重置配置");
-    m.insert((Locale::Chinese, StringKey::ResetConfirmMsg), "这将把所有配置重置为默认值。\n此操作无法撤销。\n\n确定要继续吗？");
-    m.insert((Locale::Chinese, StringKey::ResetSuccessTitle), "重置成功");
-    m.insert((Locale::Chinese, StringKey::ResetSuccessMsg), "配置已重置为默认值。\n请重新启动 Sunshine 以应用更改。");
-    m.insert((Locale::Chinese, StringKey::ResetErrorTitle), "重置失败");
-    m.insert((Locale::Chinese, StringKey::ResetErrorMsg), "无法重置配置文件。");
-    m.insert((Locale::Chinese, StringKey::ResetErrorException), "重置配置时发生错误。");
 
     // Japanese translations
-    m.insert((Locale::Japanese, StringKey::OpenSunshine), "Sunshineを開く");
+    m.insert((Locale::Japanese, StringKey::OpenSunshine), "GUIを開く");
     // VDD submenu
-    m.insert((Locale::Japanese, StringKey::VddBaseDisplay), "仮想ディスプレイ");
-    m.insert((Locale::Japanese, StringKey::VddCreate), "作成");
-    m.insert((Locale::Japanese, StringKey::VddClose), "閉じる");
-    m.insert((Locale::Japanese, StringKey::VddPersistent), "常時有効");
-    m.insert((Locale::Japanese, StringKey::VddPersistentConfirmTitle), "仮想ディスプレイの常時有効モード");
-    m.insert((Locale::Japanese, StringKey::VddPersistentConfirmMsg), "このモードを有効にすると、仮想ディスプレイは常にアクティブな状態を維持します。\n\n有効にしますか？");
+    m.insert((Locale::Japanese, StringKey::VddBaseDisplay), "基地ディスプレイ");
+    m.insert((Locale::Japanese, StringKey::VddCreate), "仮想ディスプレイを作成");
+    m.insert((Locale::Japanese, StringKey::VddClose), "仮想ディスプレイを閉じる");
+    m.insert((Locale::Japanese, StringKey::VddPersistent), "常駐仮想ディスプレイを");
+    m.insert((Locale::Japanese, StringKey::VddPersistentConfirmTitle), "仮想ディスプレイを有効に保つ");
+    m.insert((Locale::Japanese, StringKey::VddPersistentConfirmMsg), "このオプションを有効にすると、ストリーミング終了後に仮想ディスプレイは**自動的に閉じられません**。\n\nこの機能を有効にしますか？");
     // Advanced Settings submenu
     m.insert((Locale::Japanese, StringKey::AdvancedSettings), "詳細設定");
-    m.insert((Locale::Japanese, StringKey::ImportConfig), "設定をインポート");
-    m.insert((Locale::Japanese, StringKey::ExportConfig), "設定をエクスポート");
-    m.insert((Locale::Japanese, StringKey::ResetToDefault), "デフォルトに戻す");
     m.insert((Locale::Japanese, StringKey::CloseApp), "キャッシュをクリア");
     m.insert((Locale::Japanese, StringKey::CloseAppConfirmTitle), "キャッシュをクリア");
-    m.insert((Locale::Japanese, StringKey::CloseAppConfirmMsg), "現在ストリーミング中のアプリケーションを終了します。\n\n続行しますか？");
+    m.insert((Locale::Japanese, StringKey::CloseAppConfirmMsg), "この操作はストリーミング状態をクリアし、ストリーミングアプリケーションを終了する可能性があり、関連するプロセスと状態をクリーンアップします。続行しますか？");
     m.insert((Locale::Japanese, StringKey::Language), "言語");
     m.insert((Locale::Japanese, StringKey::Chinese), "中文");
     m.insert((Locale::Japanese, StringKey::English), "English");
     m.insert((Locale::Japanese, StringKey::Japanese), "日本語");
-    m.insert((Locale::Japanese, StringKey::StarProject), "スターを付ける");
-    m.insert((Locale::Japanese, StringKey::VisitProject), "プロジェクトを訪問");
-    m.insert((Locale::Japanese, StringKey::VisitProjectSunshine), "Sunshine-Foundation");
-    m.insert((Locale::Japanese, StringKey::VisitProjectMoonlight), "Moonlight-vplus");
-    m.insert((Locale::Japanese, StringKey::ResetDisplayDeviceConfig), "ディスプレイメモリをリセット");
-    m.insert((Locale::Japanese, StringKey::ResetDisplayConfirmTitle), "ディスプレイ設定をリセット");
-    m.insert((Locale::Japanese, StringKey::ResetDisplayConfirmMsg), "すべてのディスプレイデバイス設定をリセットします。\n\n続行しますか？");
+    m.insert((Locale::Japanese, StringKey::StarProject), "公式サイトを訪問");
+    m.insert((Locale::Japanese, StringKey::VisitProject), "プロジェクトアドレスを訪問");
+    m.insert((Locale::Japanese, StringKey::VisitProjectSunshine), "Sunshine");
+    m.insert((Locale::Japanese, StringKey::VisitProjectMoonlight), "Moonlight");
+    m.insert((Locale::Japanese, StringKey::ResetDisplayDeviceConfig), "ディスプレイをリセット");
+    m.insert((Locale::Japanese, StringKey::ResetDisplayConfirmTitle), "ディスプレイをリセット");
+    m.insert((Locale::Japanese, StringKey::ResetDisplayConfirmMsg), "ディスプレイデバイスのメモリをリセットしてもよろしいですか？この操作は元に戻せません。");
     m.insert((Locale::Japanese, StringKey::Restart), "再起動");
     m.insert((Locale::Japanese, StringKey::Quit), "終了");
     m.insert((Locale::Japanese, StringKey::StreamStarted), "ストリーム開始");
@@ -274,26 +202,6 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::Japanese, StringKey::QuitTitle), "本当に終了しますか？");
     m.insert((Locale::Japanese, StringKey::QuitMessage), "終了できません！\n本当に終了したいですか？\n\nこれによりSunshine GUIアプリケーションも閉じられます。");
     m.insert((Locale::Japanese, StringKey::ErrorTitle), "エラー");
-    m.insert((Locale::Japanese, StringKey::ErrorNoUserSession), "ファイルダイアログを開けません：アクティブなユーザーセッションが見つかりません。");
-    m.insert((Locale::Japanese, StringKey::ImportSuccessTitle), "インポート成功");
-    m.insert((Locale::Japanese, StringKey::ImportSuccessMsg), "設定のインポートに成功しました！\n変更を適用するにはSunshineを再起動してください。");
-    m.insert((Locale::Japanese, StringKey::ImportErrorTitle), "インポート失敗");
-    m.insert((Locale::Japanese, StringKey::ImportErrorWrite), "設定ファイルを書き込めませんでした。");
-    m.insert((Locale::Japanese, StringKey::ImportErrorRead), "選択した設定ファイルを読み取れませんでした。");
-    m.insert((Locale::Japanese, StringKey::ImportErrorException), "設定のインポート中にエラーが発生しました。");
-    m.insert((Locale::Japanese, StringKey::ExportSuccessTitle), "エクスポート成功");
-    m.insert((Locale::Japanese, StringKey::ExportSuccessMsg), "設定のエクスポートに成功しました！");
-    m.insert((Locale::Japanese, StringKey::ExportErrorTitle), "エクスポート失敗");
-    m.insert((Locale::Japanese, StringKey::ExportErrorWrite), "設定ファイルをエクスポートできませんでした。");
-    m.insert((Locale::Japanese, StringKey::ExportErrorNoConfig), "エクスポートする設定が見つかりません。");
-    m.insert((Locale::Japanese, StringKey::ExportErrorException), "設定のエクスポート中にエラーが発生しました。");
-    m.insert((Locale::Japanese, StringKey::ResetConfirmTitle), "設定のリセット");
-    m.insert((Locale::Japanese, StringKey::ResetConfirmMsg), "すべての設定をデフォルト値にリセットします。\nこの操作は元に戻せません。\n\n続行しますか？");
-    m.insert((Locale::Japanese, StringKey::ResetSuccessTitle), "リセット成功");
-    m.insert((Locale::Japanese, StringKey::ResetSuccessMsg), "設定をデフォルト値にリセットしました。\n変更を適用するにはSunshineを再起動してください。");
-    m.insert((Locale::Japanese, StringKey::ResetErrorTitle), "リセット失敗");
-    m.insert((Locale::Japanese, StringKey::ResetErrorMsg), "設定ファイルをリセットできませんでした。");
-    m.insert((Locale::Japanese, StringKey::ResetErrorException), "設定のリセット中にエラーが発生しました。");
 
     m
 });
