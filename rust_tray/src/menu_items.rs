@@ -1,7 +1,7 @@
 //! Menu Items Module - Centralized menu item definitions and handlers
 //!
 //! This is the ONLY file you need to modify when adding new menu items.
-//! 
+//!
 //! To add a new menu item:
 //! 1. Add a new entry to `define_menu_items!` macro
 //! 2. Add translation strings in i18n.rs (StringKey enum and TRANSLATIONS)
@@ -213,11 +213,11 @@ mod handlers {
 /// This is the ONLY place that defines the menu structure
 pub fn get_all_items() -> Vec<MenuItemInfo> {
     use ids::*;
-    
+
     vec![
         // ====== Top Level Items ======
         MenuItemInfo::action(OPEN_SUNSHINE, StringKey::OpenSunshine, None, 100),
-        
+
         MenuItemInfo::separator(SEP_1, None, 200),
 
         // ====== VDD Submenu ======
@@ -270,10 +270,10 @@ pub fn get_all_items() -> Vec<MenuItemInfo> {
 /// Returns (handled_locally, needs_rebuild)
 pub fn execute_handler(item_id: &str) -> (bool, bool) {
     let items = get_all_items();
-    
+
     if let Some(item) = items.iter().find(|i| i.id == item_id) {
         let needs_rebuild = item.rebuild_menu;
-        
+
         // Execute Rust handler if present (for dialogs, language changes, etc.)
         // Handler returns false to cancel the action (e.g., user clicked "No" on dialog)
         if let Some(handler) = item.handler {
@@ -281,12 +281,12 @@ pub fn execute_handler(item_id: &str) -> (bool, bool) {
                 return (true, false);  // Handled but cancelled, no rebuild
             }
         }
-        
+
         // Trigger C++ callback for action items
         trigger_action_for_id(item_id);
         return (true, needs_rebuild);
     }
-    
+
     (false, false)
 }
 

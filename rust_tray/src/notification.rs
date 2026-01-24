@@ -5,7 +5,7 @@
 use winrt_notification::{Duration, Sound, Toast};
 
 /// Application ID for toast notifications
-/// 
+///
 /// Using "Sunshine" as a simple app identifier. For full Windows integration
 /// (notification center grouping, settings, etc.), this should ideally match
 /// a shortcut in the Start Menu with the same AppUserModelID property.

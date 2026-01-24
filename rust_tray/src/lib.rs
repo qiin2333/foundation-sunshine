@@ -30,7 +30,7 @@ use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, PeekMessageW, PostQuitMessage, TranslateMessage, 
+    DispatchMessageW, GetMessageW, PeekMessageW, PostQuitMessage, TranslateMessage,
     MSG, WM_QUIT, PM_REMOVE, WM_DPICHANGED,
 };
 
@@ -180,7 +180,7 @@ fn identify_menu_item(event: &MenuEvent) -> Option<String> {
 /// Uses menu_items module for centralized handling
 fn execute_action_by_id(item_id: &str) {
     let (handled, needs_rebuild) = menu_items::execute_handler(item_id);
-    
+
     if handled && needs_rebuild {
         update_menu_texts();
     }
@@ -194,26 +194,26 @@ fn process_menu_event(event: &MenuEvent) {
 }
 
 /// Update menu texts after language change by rebuilding the menu
-/// 
+///
 /// On Windows, simply updating menu item texts with set_text() and calling set_menu()
 /// can cause issues with the menu event handling. The safest approach is to rebuild
 /// the entire menu with the new texts.
 fn update_menu_texts() {
     use menu_items::ids;
-    
+
     // Save current VDD states
     let vdd_create_checked = menu::get_check_state_by_id(ids::VDD_CREATE).unwrap_or(false);
     let vdd_close_checked = menu::get_check_state_by_id(ids::VDD_CLOSE).unwrap_or(false);
     let vdd_persistent_checked = menu::get_check_state_by_id(ids::VDD_PERSISTENT).unwrap_or(false);
-    
+
     // Build new menu using the menu module
     let new_menu = menu::rebuild_menu();
-    
+
     // Restore VDD states
     menu::set_check_state_by_id(ids::VDD_CREATE, vdd_create_checked);
     menu::set_check_state_by_id(ids::VDD_CLOSE, vdd_close_checked);
     menu::set_check_state_by_id(ids::VDD_PERSISTENT, vdd_persistent_checked);
-    
+
     // Update tray state
     if let Some(state_mutex) = TRAY_STATE.get() {
         let mut state_guard = state_mutex.lock();
@@ -229,7 +229,7 @@ fn update_menu_texts() {
 // ============================================================================
 
 /// Initialize the tray with icon paths
-/// 
+///
 /// # Arguments
 /// * `icon_normal` - Path to normal icon
 /// * `icon_playing` - Path to playing icon
@@ -238,7 +238,7 @@ fn update_menu_texts() {
 /// * `tooltip` - Tooltip text
 /// * `locale` - Initial locale (e.g., "zh", "en", "ja")
 /// * `callback` - Callback function for menu actions
-/// 
+///
 /// # Returns
 /// 0 on success, -1 on error
 #[no_mangle]
@@ -256,28 +256,28 @@ pub unsafe extern "C" fn tray_init_ex(
     let playing = c_str_to_string(icon_playing).unwrap_or_default();
     let pausing = c_str_to_string(icon_pausing).unwrap_or_default();
     let locked = c_str_to_string(icon_locked).unwrap_or_default();
-    
+
     let _ = ICON_PATHS.set(IconPaths {
         normal: normal.clone(),
         playing,
         pausing,
         locked,
     });
-    
+
     // Set locale
     if let Some(loc) = c_str_to_string(locale) {
         set_locale_str(&loc);
     }
-    
+
     // Register callback
     register_callback(callback);
-    
+
     // Initialize global state
     let _ = TRAY_STATE.get_or_init(|| Mutex::new(None));
-    
+
     // Reset exit flag
     SHOULD_EXIT.store(false, Ordering::SeqCst);
-    
+
     // Load icon
     let icon = match load_icon(&normal) {
         Some(i) => i,
@@ -286,13 +286,13 @@ pub unsafe extern "C" fn tray_init_ex(
             return -1;
         }
     };
-    
+
     // Get tooltip
     let tooltip_str = c_str_to_string(tooltip).unwrap_or_else(|| "Sunshine".to_string());
-    
+
     // Build menu using the menu module
     let menu = menu::rebuild_menu();
-    
+
     // Create tray icon
     let tray_icon = match TrayIconBuilder::new()
         .with_icon(icon)
@@ -306,25 +306,25 @@ pub unsafe extern "C" fn tray_init_ex(
             return -1;
         }
     };
-    
+
     // Store state
     let state = TrayState {
         icon: tray_icon,
         menu,
     };
-    
+
     if let Some(state_mutex) = TRAY_STATE.get() {
         *state_mutex.lock() = Some(state);
     }
-    
+
     0
 }
 
 /// Run one iteration of the event loop
-/// 
+///
 /// # Arguments
 /// * `blocking` - If non-zero, block until an event is available
-/// 
+///
 /// # Returns
 /// 0 on success, -1 if exit was requested
 #[no_mangle]
@@ -387,7 +387,7 @@ pub extern "C" fn tray_exit() {
 }
 
 /// Set the tray icon
-/// 
+///
 /// # Arguments
 /// * `icon_type` - 0=normal, 1=playing, 2=pausing, 3=locked
 #[no_mangle]
@@ -399,7 +399,7 @@ pub extern "C" fn tray_set_icon(icon_type: c_int) {
         Some(p) => p,
         None => return,
     };
-    
+
     let icon_path = match icon_type {
         0 => &icon_paths.normal,
         1 => &icon_paths.playing,
@@ -407,7 +407,7 @@ pub extern "C" fn tray_set_icon(icon_type: c_int) {
         3 => &icon_paths.locked,
         _ => &icon_paths.normal,
     };
-    
+
     if let Some(icon) = load_icon(icon_path) {
         if let Some(state_mutex) = TRAY_STATE.get() {
             let state_guard = state_mutex.lock();
@@ -432,16 +432,16 @@ pub unsafe extern "C" fn tray_set_tooltip(tooltip: *const c_char) {
 }
 
 /// Update VDD menu item states
-/// 
+///
 /// This unified function is called from C++ to update all VDD menu states at once.
 /// The C++ side is responsible for:
 /// - Tracking VDD active state
 /// - Managing 10-second cooldown
 /// - Determining which operations are allowed
-/// 
+///
 /// # Parameters
 /// * `can_create` - 1 if Create item should be enabled, 0 otherwise
-/// * `can_close` - 1 if Close item should be enabled, 0 otherwise  
+/// * `can_close` - 1 if Close item should be enabled, 0 otherwise
 /// * `is_persistent` - 1 if Keep Enabled is checked, 0 otherwise
 /// * `is_active` - 1 if VDD is currently active, 0 otherwise
 #[no_mangle]
@@ -469,7 +469,7 @@ pub unsafe extern "C" fn tray_set_locale(locale: *const c_char) {
 }
 
 /// Show a Windows toast notification
-/// 
+///
 /// # Arguments
 /// * `title` - Notification title (UTF-8 string)
 /// * `text` - Notification body text (UTF-8 string)
@@ -482,7 +482,7 @@ pub unsafe extern "C" fn tray_show_notification(
 ) {
     let title_str = c_str_to_string(title).unwrap_or_default();
     let text_str = c_str_to_string(text).unwrap_or_default();
-    
+
     let icon = notification::NotificationIcon::from(icon_type);
     notification::show_notification(&title_str, &text_str, icon);
 }
@@ -498,7 +498,7 @@ pub enum NotificationType {
 }
 
 /// Show a localized toast notification
-/// 
+///
 /// # Arguments
 /// * `notification_type` - Type of notification (0=stream_started, 1=stream_paused, 2=app_stopped, 3=pairing_request)
 /// * `app_name` - Application name for formatting (optional, UTF-8 string)
@@ -508,7 +508,7 @@ pub unsafe extern "C" fn tray_show_localized_notification(
     app_name: *const c_char,
 ) {
     let app_name_str = c_str_to_string(app_name).unwrap_or_default();
-    
+
     let (title, text, icon) = match notification_type {
         0 => {
             // Stream started
@@ -536,6 +536,6 @@ pub unsafe extern "C" fn tray_show_localized_notification(
         },
         _ => return,
     };
-    
+
     notification::show_notification(&title, &text, icon);
 }

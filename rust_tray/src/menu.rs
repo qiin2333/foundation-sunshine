@@ -23,7 +23,7 @@ pub struct MenuIdEntry {
 
 // Thread-local storage for actual muda items (not thread-safe)
 thread_local! {
-    static CREATED_ITEMS: std::cell::RefCell<HashMap<String, CreatedItem>> = 
+    static CREATED_ITEMS: std::cell::RefCell<HashMap<String, CreatedItem>> =
         std::cell::RefCell::new(HashMap::new());
 }
 
@@ -35,7 +35,7 @@ enum CreatedItem {
 
 /// Global menu ID registry - maps item_id to muda MenuId string
 /// This is thread-safe as it only stores strings
-static MENU_ID_REGISTRY: Lazy<RwLock<HashMap<String, MenuIdEntry>>> = 
+static MENU_ID_REGISTRY: Lazy<RwLock<HashMap<String, MenuIdEntry>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Clear the registries
@@ -111,17 +111,17 @@ pub fn identify_item_id(event: &MenuEvent) -> Option<String> {
 pub fn rebuild_menu() -> Menu {
     // Clear old registry
     clear_registry();
-    
+
     let items = menu_items::get_all_items();
-    
+
     // First pass: create all items and submenus
     let mut submenus: HashMap<&str, Submenu> = HashMap::new();
     let mut regular_items: HashMap<&str, Box<dyn muda::IsMenuItem>> = HashMap::new();
-    
+
     // Sort items by order
     let mut sorted_items: Vec<_> = items.iter().collect();
     sorted_items.sort_by_key(|item| item.order);
-    
+
     // Create submenus first
     for info in &sorted_items {
         if info.kind == ItemKind::Submenu {
@@ -133,7 +133,7 @@ pub fn rebuild_menu() -> Menu {
             }
         }
     }
-    
+
     // Create all other items
     for info in &sorted_items {
         match info.kind {
@@ -162,7 +162,7 @@ pub fn rebuild_menu() -> Menu {
             }
         }
     }
-    
+
     // Second pass: add items to their parent submenus
     for info in &sorted_items {
         if let Some(parent_id) = info.parent {
@@ -177,7 +177,7 @@ pub fn rebuild_menu() -> Menu {
             }
         }
     }
-    
+
     // Third pass: build main menu with top-level items
     let menu = Menu::new();
     for info in &sorted_items {
@@ -191,7 +191,7 @@ pub fn rebuild_menu() -> Menu {
             }
         }
     }
-    
+
     menu
 }
 
@@ -200,9 +200,9 @@ pub fn rebuild_menu() -> Menu {
 // ============================================================================
 
 /// Update VDD menu item states
-/// 
+///
 /// Called from C++ side to update menu item enabled/disabled/checked states.
-/// 
+///
 /// # Parameters
 /// * `can_create` - Whether "Create" item should be enabled
 /// * `can_close` - Whether "Close" item should be enabled
@@ -210,17 +210,17 @@ pub fn rebuild_menu() -> Menu {
 /// * `is_active` - Whether VDD is currently active (for checked states)
 pub fn update_vdd_menu_state(can_create: bool, can_close: bool, is_persistent: bool, is_active: bool) {
     use menu_items::ids;
-    
+
     // Update Create item
     // Checked when VDD is active, enabled based on can_create
     set_check_state_by_id(ids::VDD_CREATE, is_active);
     set_item_enabled_by_id(ids::VDD_CREATE, can_create);
-    
+
     // Update Close item
     // Checked when VDD is NOT active, enabled based on can_close
     set_check_state_by_id(ids::VDD_CLOSE, !is_active);
     set_item_enabled_by_id(ids::VDD_CLOSE, can_close);
-    
+
     // Update Keep Enabled item
     set_check_state_by_id(ids::VDD_PERSISTENT, is_persistent);
 }
@@ -228,7 +228,7 @@ pub fn update_vdd_menu_state(can_create: bool, can_close: bool, is_persistent: b
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_get_all_items() {
         let items = menu_items::get_all_items();

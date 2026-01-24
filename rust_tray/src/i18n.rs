@@ -1,5 +1,5 @@
 //! Internationalization (i18n) module for tray icon
-//! 
+//!
 //! Supports Chinese, English, and Japanese translations.
 
 use std::collections::HashMap;
@@ -62,7 +62,7 @@ pub enum StringKey {
     ResetDisplayConfirmMsg,
     Restart,
     Quit,
-    
+
     // Notifications
     StreamStarted,
     StreamingStartedFor,
@@ -72,7 +72,7 @@ pub enum StringKey {
     ApplicationStoppedMsg,
     IncomingPairingRequest,
     ClickToCompletePairing,
-    
+
     // Dialog messages
     QuitTitle,
     QuitMessage,
@@ -85,7 +85,7 @@ static CURRENT_LOCALE: Lazy<RwLock<Locale>> = Lazy::new(|| RwLock::new(Locale::E
 /// Translation tables
 static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
-    
+
     // English translations
     m.insert((Locale::English, StringKey::OpenSunshine), "Open GUI");
     // VDD submenu
@@ -224,17 +224,17 @@ pub fn set_locale_str(locale_str: &str) {
 /// Get localized string
 pub fn get_string(key: StringKey) -> &'static str {
     let locale = get_locale();
-    
+
     // Try current locale first
     if let Some(s) = TRANSLATIONS.get(&(locale, key)) {
         return s;
     }
-    
+
     // Fallback to English
     if let Some(s) = TRANSLATIONS.get(&(Locale::English, key)) {
         return s;
     }
-    
+
     // Return empty string if not found
     ""
 }
@@ -262,10 +262,10 @@ mod tests {
     fn test_get_string() {
         set_locale(Locale::English);
         assert_eq!(get_string(StringKey::OpenSunshine), "Open Sunshine");
-        
+
         set_locale(Locale::Chinese);
         assert_eq!(get_string(StringKey::OpenSunshine), "打开 Sunshine");
-        
+
         set_locale(Locale::Japanese);
         assert_eq!(get_string(StringKey::OpenSunshine), "Sunshineを開く");
     }
