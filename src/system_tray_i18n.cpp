@@ -16,6 +16,9 @@ namespace system_tray_i18n {
   const std::string KEY_VDD_CREATE = "vdd_create";
   const std::string KEY_VDD_CLOSE = "vdd_close";
   const std::string KEY_VDD_PERSISTENT = "vdd_persistent";
+  const std::string KEY_VDD_HEADLESS_CREATE = "vdd_headless_create";
+  const std::string KEY_VDD_HEADLESS_CREATE_CONFIRM_TITLE = "vdd_headless_create_confirm_title";
+  const std::string KEY_VDD_HEADLESS_CREATE_CONFIRM_MSG = "vdd_headless_create_confirm_msg";
   const std::string KEY_VDD_CONFIRM_CREATE_TITLE = "vdd_confirm_create_title";
   const std::string KEY_VDD_CONFIRM_CREATE_MSG = "vdd_confirm_create_msg";
   const std::string KEY_VDD_CONFIRM_KEEP_TITLE = "vdd_confirm_keep_title";
@@ -95,6 +98,9 @@ namespace system_tray_i18n {
     { KEY_VDD_CREATE, "Create Virtual Display" },
     { KEY_VDD_CLOSE, "Close Virtual Display" },
     { KEY_VDD_PERSISTENT, "Keep Enabled" },
+    { KEY_VDD_HEADLESS_CREATE, "Create When No Display (after stream end)" },
+    { KEY_VDD_HEADLESS_CREATE_CONFIRM_TITLE, "[Beta] Enable: Create When No Display" },
+    { KEY_VDD_HEADLESS_CREATE_CONFIRM_MSG, "This is an internal beta feature. It works differently from \"Keep Enabled\". It only runs when Sunshine starts or when a stream ends; on headless hosts it can create the base display after stream end to avoid app issues.\n\nIf you later connect a physical display, the screen might show only on the base display (physical screen black). Use Ctrl+Alt+Win+B to restore, or start then end a stream to release the base display.\n\nEnable this feature?" },
     { KEY_VDD_CONFIRM_CREATE_TITLE, "Create Virtual Display" },
     { KEY_VDD_CONFIRM_CREATE_MSG, "Are you sure you want to create a virtual display?\n\nCreating a display may cause a brief black screen, which is normal.\nIf you encounter a black screen, please press Win+P twice to recover." },
     { KEY_VDD_CONFIRM_KEEP_TITLE, "Confirm Virtual Display" },
@@ -171,6 +177,9 @@ namespace system_tray_i18n {
     { KEY_VDD_CREATE, "创建显示器" },
     { KEY_VDD_CLOSE, "关闭显示器" },
     { KEY_VDD_PERSISTENT, "保持启用" },
+    { KEY_VDD_HEADLESS_CREATE, "无显示器时自动创建" },
+    { KEY_VDD_HEADLESS_CREATE_CONFIRM_TITLE, "【内测功能】启用「无显示器时自动创建」" },
+    { KEY_VDD_HEADLESS_CREATE_CONFIRM_MSG, "此为内测功能，请知悉。与「保持启用」原理不同。仅在 Sunshine 启动或串流结束时检测；无头主机退出串流后若无显示器，将自动创建基地显示器，避免部分应用异常。\n\n若之后接回物理显示器，可能被设为仅基地显示器可见而黑屏，可按 Ctrl+Alt+Win+B 恢复显示，或重新串流后再结束以释放基地显示器。\n\n确定启用？" },
     { KEY_VDD_CONFIRM_CREATE_TITLE, "创建基地显示器" },
     { KEY_VDD_CONFIRM_CREATE_MSG, "确定要创建基地显示器吗？\n\n创建后可能会短暂黑屏，这是正常现象。\n如遇黑屏，请按两次 Win+P 恢复。" },
     { KEY_VDD_CONFIRM_KEEP_TITLE, "显示器确认" },
@@ -246,6 +255,9 @@ namespace system_tray_i18n {
     { KEY_VDD_CREATE, "仮想ディスプレイを作成" },
     { KEY_VDD_CLOSE, "仮想ディスプレイを閉じる" },
     { KEY_VDD_PERSISTENT, "常駐仮想ディスプレイを" },
+    { KEY_VDD_HEADLESS_CREATE, "ストリーム終了後にディスプレイが無い場合に作成" },
+    { KEY_VDD_HEADLESS_CREATE_CONFIRM_TITLE, "【β版】「ディスプレイ無し時に作成」を有効にする" },
+    { KEY_VDD_HEADLESS_CREATE_CONFIRM_MSG, "内側テスト用のβ機能です。「常駐」とは仕様が異なります。Sunshine 起動時またはストリーム終了時のみ検出し、ヘッドレスでストリーム終了後にディスプレイが無い場合に基地ディスプレイを自動作成し、一部アプリの不具合を防ぎます。\n\n後に物理ディスプレイを接続すると、表示が基地ディスプレイのみになる（物理が黒画面）場合があります。Ctrl+Alt+Win+B で復元するか、ストリームを開始して終了すると基地ディスプレイが解放されます。\n\n有効にしますか？" },
     { KEY_VDD_CONFIRM_CREATE_TITLE, "仮想ディスプレイを作成" },
     { KEY_VDD_CONFIRM_CREATE_MSG, "仮想ディスプレイを作成しますか？\n\n作成後に一時的な黒画面が発生する場合がありますが、これは正常です。\n黒画面になった場合は、Win+P を2回押して回復してください。" },
     { KEY_VDD_CONFIRM_KEEP_TITLE, "ディスプレイの確認" },
