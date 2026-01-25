@@ -101,9 +101,9 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::English, StringKey::CloseAppConfirmTitle), "Clear Cache");
     m.insert((Locale::English, StringKey::CloseAppConfirmMsg), "This operation will clear streaming state, may terminate the streaming application, and clean up related processes and state. Do you want to continue?");
     m.insert((Locale::English, StringKey::Language), "Language");
-    m.insert((Locale::English, StringKey::Chinese), "中文");
+    m.insert((Locale::English, StringKey::Chinese), "中文 (Chinese)");
     m.insert((Locale::English, StringKey::English), "English");
-    m.insert((Locale::English, StringKey::Japanese), "日本語");
+    m.insert((Locale::English, StringKey::Japanese), "日本語 (Japanese)");
     m.insert((Locale::English, StringKey::StarProject), "Visit Website");
     m.insert((Locale::English, StringKey::VisitProject), "Visit Project");
     m.insert((Locale::English, StringKey::VisitProjectSunshine), "Sunshine");
@@ -139,10 +139,10 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::Chinese, StringKey::CloseApp), "清理缓存");
     m.insert((Locale::Chinese, StringKey::CloseAppConfirmTitle), "清理缓存");
     m.insert((Locale::Chinese, StringKey::CloseAppConfirmMsg), "此操作将会清理串流状态，可能会终止串流应用，并清理相关进程和状态。是否继续？");
-    m.insert((Locale::Chinese, StringKey::Language), "语言");
+    m.insert((Locale::Chinese, StringKey::Language), "语言 Language");
     m.insert((Locale::Chinese, StringKey::Chinese), "中文");
-    m.insert((Locale::Chinese, StringKey::English), "English");
-    m.insert((Locale::Chinese, StringKey::Japanese), "日本語");
+    m.insert((Locale::Chinese, StringKey::English), "English (英语)");
+    m.insert((Locale::Chinese, StringKey::Japanese), "日本語 (日语)");
     m.insert((Locale::Chinese, StringKey::StarProject), "访问官网");
     m.insert((Locale::Chinese, StringKey::VisitProject), "访问项目地址");
     m.insert((Locale::Chinese, StringKey::VisitProjectSunshine), "Sunshine");
@@ -178,9 +178,9 @@ static TRANSLATIONS: Lazy<HashMap<(Locale, StringKey), &'static str>> = Lazy::ne
     m.insert((Locale::Japanese, StringKey::CloseApp), "キャッシュをクリア");
     m.insert((Locale::Japanese, StringKey::CloseAppConfirmTitle), "キャッシュをクリア");
     m.insert((Locale::Japanese, StringKey::CloseAppConfirmMsg), "この操作はストリーミング状態をクリアし、ストリーミングアプリケーションを終了する可能性があり、関連するプロセスと状態をクリーンアップします。続行しますか？");
-    m.insert((Locale::Japanese, StringKey::Language), "言語");
-    m.insert((Locale::Japanese, StringKey::Chinese), "中文");
-    m.insert((Locale::Japanese, StringKey::English), "English");
+    m.insert((Locale::Japanese, StringKey::Language), "言語 Language");
+    m.insert((Locale::Japanese, StringKey::Chinese), "中文 (中国語)");
+    m.insert((Locale::Japanese, StringKey::English), "English (英語)");
     m.insert((Locale::Japanese, StringKey::Japanese), "日本語");
     m.insert((Locale::Japanese, StringKey::StarProject), "公式サイトを訪問");
     m.insert((Locale::Japanese, StringKey::VisitProject), "プロジェクトアドレスを訪問");
