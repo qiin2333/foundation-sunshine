@@ -285,7 +285,7 @@ namespace system_tray {
     tray_update(&tray);
   };
 
-  // 无显示器时自动创建回调
+  // 无显示器时自动创建
   auto tray_vdd_headless_create_cb = [](struct tray_menu *item) {
     BOOST_LOG(info) << "Toggling headless VDD create from system tray"sv;
     if (!config::video.vdd_headless_create_enabled) {
