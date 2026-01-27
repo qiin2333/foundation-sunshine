@@ -1556,6 +1556,58 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### [subprocess_mode](https://localhost:47990/config/#subprocess_mode)
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Enable subprocess streaming mode. In this mode, video/audio capture, encoding, and network sending
+            are performed by a separate user-level subprocess instead of the main process.
+            @note{This is an experimental feature that can provide lower latency by eliminating cross-process
+            data transfers. It also enables Windows Graphics Capture (WGC) support when running as a service.}
+            @warning{This feature is experimental and may not work correctly in all configurations.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            false
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            subprocess_mode = true
+            @endcode</td>
+    </tr>
+</table>
+
+### [subprocess_sender_path](https://localhost:47990/config/#subprocess_sender_path)
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Path to the sender subprocess executable. If not specified, the default location is used
+            (same directory as the main Sunshine executable).
+            @note{This option is only used when subprocess_mode is enabled.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            (auto-detected)
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            subprocess_sender_path = C:\Program Files\Sunshine\sunshine-sender.exe
+            @endcode</td>
+    </tr>
+</table>
+
 ### [ping_timeout](https://localhost:47990/config/#ping_timeout)
 
 <table>

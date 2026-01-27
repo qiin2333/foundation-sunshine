@@ -132,6 +132,11 @@ namespace config {
     // Video encryption settings for LAN and WAN streams
     int lan_encryption_mode;
     int wan_encryption_mode;
+
+    // Subprocess streaming mode: separates capture/encode/send into a user-level subprocess
+    // This reduces latency by avoiding cross-process data transfer and enables WGC capture
+    bool subprocess_mode;
+    std::string subprocess_sender_path;  // Path to sender executable (auto-detected if empty)
   };
 
   struct nvhttp_t {

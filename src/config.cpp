@@ -465,6 +465,9 @@ namespace config {
 
     ENCRYPTION_MODE_NEVER,  // lan_encryption_mode
     ENCRYPTION_MODE_OPPORTUNISTIC,  // wan_encryption_mode
+
+    false,  // subprocess_mode - disabled by default (experimental)
+    "",     // subprocess_sender_path - auto-detected if empty
   };
 
   nvhttp_t nvhttp {
@@ -1264,6 +1267,10 @@ namespace config {
 #endif
 
     int_between_f(vars, "fec_percentage", stream.fec_percentage, {1, 255});
+
+    // Subprocess streaming mode configuration
+    bool_f(vars, "subprocess_mode", stream.subprocess_mode);
+    string_f(vars, "subprocess_sender_path", stream.subprocess_sender_path);
 
     map_int_int_f(vars, "keybindings"s, input.keybindings);
 

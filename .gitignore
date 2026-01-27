@@ -61,4 +61,4 @@ package-lock.json
 venv/
 
 # Generated files
-src_assets/common/assets/web/welcome.html
+src_assets/common/assets/web/welcome.html_codeql_detected_source_root
