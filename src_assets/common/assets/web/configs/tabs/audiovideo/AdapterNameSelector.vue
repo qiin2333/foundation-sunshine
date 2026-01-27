@@ -45,7 +45,6 @@ const uniqueAdapters = computed(() => {
       <PlatformLayout :platform="platform">
         <template #windows>
           {{ $t('config.adapter_name_desc_windows') }}<br>
-          <pre>{{ $t('config.adapter_name_desc_windows_vdd_hint') }}</pre>
         </template>
         <template #linux>
           {{ $t('config.adapter_name_desc_linux_1') }}<br>

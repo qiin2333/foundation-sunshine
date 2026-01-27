@@ -633,7 +633,7 @@
     "selected_adapter": "Vald adapter",
     "selected_display": "Vald skärm",
     "setup_complete": "Installation slutförd!",
-    "setup_complete_desc": "Din grundläggande konfiguration har sparats. Låt oss nu konfigurera dina applikationer.",
+    "setup_complete_desc": "Grundinställningarna är nu aktiva. Du kan börja strömma med en Moonlight-klient direkt!",
     "skip": "Hoppa över installationsguiden",
     "skip_confirm": "Är du säker på att du vill hoppa över installationsguiden? Du kan konfigurera dessa alternativ senare på inställningssidan.",
     "skip_confirm_title": "Hoppa över installationsguiden",

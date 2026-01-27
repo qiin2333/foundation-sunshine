@@ -633,7 +633,7 @@
     "selected_adapter": "Seçilen Adaptör",
     "selected_display": "Seçilen Ekran",
     "setup_complete": "Kurulum Tamamlandı!",
-    "setup_complete_desc": "Temel yapılandırmanız kaydedildi. Şimdi uygulamalarınızı yapılandıralım.",
+    "setup_complete_desc": "Temel ayarlar şimdi aktif. Hemen bir Moonlight istemcisi ile yayın yapmaya başlayabilirsiniz!",
     "skip": "Kurulum Sihirbazını Atla",
     "skip_confirm": "Kurulum sihirbazını atlamak istediğinizden emin misiniz? Bu seçenekleri daha sonra ayarlar sayfasından yapılandırabilirsiniz.",
     "skip_confirm_title": "Kurulum Sihirbazını Atla",
