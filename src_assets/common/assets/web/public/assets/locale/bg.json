@@ -702,7 +702,7 @@
     "reopen_setup_wizard": "Отваряне отново на майстора за настройка",
     "reopen_setup_wizard_desc": "Отваряне отново на страницата на майстора за настройка, за да се конфигурират отново началните настройки.",
     "reopen_setup_wizard_error": "Грешка при отваряне отново на майстора за настройка",
-    "reset_display_device_desc_windows": "If Sunshine is stuck trying to restore the changed display device settings, you can reset the settings and proceed to restore the display state manually.\nThis could happen for various reasons: device is no longer available, has been plugged to a different port and so on.",
+    "reset_display_device_desc_windows": "Ако Sunshine е заседнал при опит за възстановяване на променените настройки на устройството за дисплей, можете да нулирате настройките и да възстановите състоянието на дисплея ръчно.\nТова може да се случи по различни причини: устройството вече не е налично, беше свързано към друг порт и т.н.",
     "reset_display_device_error_windows": "Грешка при нулиране на постоянността!",
     "reset_display_device_success_windows": "Успешно нулиране на постоянността!",
     "reset_display_device_windows": "Нулиране на паметта на дисплея",

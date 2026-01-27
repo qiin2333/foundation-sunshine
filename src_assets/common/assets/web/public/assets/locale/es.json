@@ -702,7 +702,7 @@
     "reopen_setup_wizard": "Reabrir asistente de configuración",
     "reopen_setup_wizard_desc": "Reabrir la página del asistente de configuración para reconfigurar la configuración inicial.",
     "reopen_setup_wizard_error": "Error al reabrir el asistente de configuración",
-    "reset_display_device_desc_windows": "If Sunshine is stuck trying to restore the changed display device settings, you can reset the settings and proceed to restore the display state manually.\nThis could happen for various reasons: device is no longer available, has been plugged to a different port and so on.",
+    "reset_display_device_desc_windows": "Si Sunshine está atascado intentando restaurar la configuración del dispositivo de visualización modificada, puede restablecer la configuración y proceder a restaurar el estado de la pantalla manualmente.\nEsto puede ocurrir por varias razones: el dispositivo ya no está disponible, se ha conectado a un puerto diferente, etc.",
     "reset_display_device_error_windows": "Error al restablecer la persistencia!",
     "reset_display_device_success_windows": "Restablecimiento de persistencia exitoso!",
     "reset_display_device_windows": "Restablecer memoria de pantalla",
