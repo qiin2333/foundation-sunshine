@@ -990,8 +990,7 @@ namespace nvhttp {
         json json_cmd;
         json_cmd["id"] = cmd.id;
         json_cmd["name"] = cmd.name;
-        json_cmd["do_cmd"] = cmd.do_cmd;
-        json_cmd["elevated"] = cmd.elevated;
+        // do_cmd and elevated intentionally omitted for security
 
         json_cmds.push_back(json_cmd);
       }
