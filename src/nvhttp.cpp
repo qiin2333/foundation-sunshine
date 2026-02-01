@@ -13,6 +13,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 // lib includes
@@ -59,6 +60,11 @@ namespace nvhttp {
 
   namespace fs = std::filesystem;
   namespace pt = boost::property_tree;
+
+  static const std::unordered_set<std::string> blocked_paths = {
+    "/", "/index.html", "/index.htm", "/index",
+    "/favicon.ico", "/favicon.png", "/favicon.svg"
+  };
 
   crypto::cert_chain_t cert_chain;
 
@@ -695,6 +701,13 @@ namespace nvhttp {
   void
   not_found(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     print_req<T>(request);
+
+    // Security hardening: Return 444 for root paths to prevent probing
+    if (blocked_paths.count(request->path)) {
+      *response << "HTTP/1.1 444 No Response\r\n";
+      response->close_connection_after_response = true;
+      return;
+    }
 
     pt::ptree tree;
     tree.put("root.<xmlattr>.status_code", 404);

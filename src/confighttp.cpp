@@ -243,6 +243,13 @@ namespace confighttp {
   }
 
   void
+  close_connection(resp_https_t response, req_https_t request) {
+      *response << "HTTP/1.1 444 No Response\r\n";
+      response->close_connection_after_response = true;
+      return;
+  }
+
+  void
   getHtmlPage(resp_https_t response, req_https_t request, const std::string& pageName, bool requireAuth = true) {
     if (requireAuth && !authenticate(response, request)) return;
 
@@ -1729,7 +1736,7 @@ namespace confighttp {
     auto address_family = net::af_from_enum_string(config::sunshine.address_family);
 
     https_server_t server { config::nvhttp.cert, config::nvhttp.pkey };
-    server.default_resource["GET"] = not_found;
+    server.default_resource["GET"] = close_connection;
     server.resource["^/$"]["GET"] = getIndexPage;
     server.resource["^/pin/?$"]["GET"] = getPinPage;
     server.resource["^/apps/?$"]["GET"] = getAppsPage;
