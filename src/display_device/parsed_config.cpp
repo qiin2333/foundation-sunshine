@@ -613,8 +613,15 @@ namespace display_device {
     // 不需要VDD时直接返回
     if (!needs_vdd) {
       BOOST_LOG(debug) << "输出设备已存在，跳过VDD准备"sv;
+      parsed_config.use_vdd = false;
       return parsed_config;
     }
+
+    // 标记为VDD模式
+    // VDD模式下，vdd_prep 控制屏幕布局，apply_config 会根据 use_vdd 分别处理
+    // device_prep 保留原值但不会被使用（由 handle_topology_for_vdd_mode 处理）
+    parsed_config.use_vdd = true;
+    BOOST_LOG(debug) << "VDD模式：使用 vdd_prep 控制屏幕布局"sv;
 
     // 不是SYSTEM权限且处于RDP中，强制使用RDP虚拟显示器，不创建VDD
     if (!is_running_as_system_user && display_device::w_utils::is_any_rdp_session_active()) {
