@@ -537,6 +537,19 @@ namespace display_device {
     return static_cast<int>(parsed_config_t::hdr_prep_e::no_operation);
   }
 
+  int
+  parsed_config_t::vdd_prep_from_view(std::string_view value) {
+    using namespace std::string_view_literals;
+#define _CONVERT_(x) \
+  if (value == #x##sv) return static_cast<int>(parsed_config_t::vdd_prep_e::x);
+    _CONVERT_(no_operation);
+    _CONVERT_(vdd_as_primary);
+    _CONVERT_(vdd_as_secondary);
+    _CONVERT_(display_off);
+#undef _CONVERT_
+    return static_cast<int>(parsed_config_t::vdd_prep_e::no_operation);
+  }
+
   boost::optional<parsed_config_t>
   make_parsed_config(const config::video_t &config, const rtsp_stream::launch_session_t &session, bool is_reconfigure) {
     parsed_config_t parsed_config;
@@ -553,6 +566,7 @@ namespace display_device {
     
     parsed_config.device_id = device_id_to_use;
     parsed_config.device_prep = static_cast<parsed_config_t::device_prep_e>(config.display_device_prep);
+    parsed_config.vdd_prep = static_cast<parsed_config_t::vdd_prep_e>(config.vdd_prep);
     parsed_config.change_hdr_state = parse_hdr_option(config, session);
 
     const int custom_screen_mode = session.custom_screen_mode;

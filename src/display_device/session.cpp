@@ -511,10 +511,19 @@ namespace display_device {
     current_vdd_client_id = current_client_id;
     BOOST_LOG(info) << "成功配置VDD设备: " << device_zako;
 
-    // Ensure VDD is in extended mode
+    // Ensure VDD is in extended mode first
     if (vdd_utils::ensure_vdd_extended_mode(device_zako)) {
       BOOST_LOG(info) << "已将VDD切换到扩展模式";
       std::this_thread::sleep_for(500ms);
+    }
+
+    // Apply VDD prep settings to handle physical displays
+    // This modifies topology without saving/restoring state
+    if (vdd_utils::apply_vdd_prep(device_zako, config.vdd_prep)) {
+      if (config.vdd_prep != parsed_config_t::vdd_prep_e::no_operation) {
+        BOOST_LOG(info) << "已应用VDD物理显示器处理设置";
+        std::this_thread::sleep_for(500ms);
+      }
     }
 
     // Set HDR state with retry

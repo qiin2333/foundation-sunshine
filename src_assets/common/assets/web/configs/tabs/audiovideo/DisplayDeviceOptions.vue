@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { $tp } from '../../../platform-i18n'
 import PlatformLayout from '../../../components/layout/PlatformLayout.vue'
 
@@ -11,6 +11,11 @@ const props = defineProps({
 
 const config = ref(props.config)
 const display_mode_remapping = ref(props.display_mode_remapping || [])
+
+// Check if VDD mode is enabled (output_name is 'ZakoHDR')
+const isVddMode = computed(() => {
+  return config.value.output_name === 'ZakoHDR'
+})
 
 // TODO: Sample for use in PR #2032
 function getRemappingType() {
@@ -67,8 +72,8 @@ function addRemapping(type) {
                 </div>
               </div>
 
-              <!-- Device display preparation -->
-              <div class="mb-3">
+              <!-- Device display preparation (hidden in VDD mode) -->
+              <div class="mb-3" v-if="!isVddMode">
                 <label for="display_device_prep" class="form-label">
                   {{ $tp('config.display_device_prep') }}
                 </label>
@@ -80,6 +85,22 @@ function addRemapping(type) {
                     {{ $tp('config.display_device_prep_ensure_only_display') }}
                   </option>
                 </select>
+              </div>
+
+              <!-- VDD mode: Physical display preparation (only shown in VDD mode) -->
+              <div class="mb-3" v-if="isVddMode">
+                <label for="vdd_prep" class="form-label">
+                  {{ $tp('config.vdd_prep') }}
+                </label>
+                <select id="vdd_prep" class="form-select" v-model="config.vdd_prep">
+                  <option value="no_operation">{{ $tp('config.vdd_prep_no_operation') }}</option>
+                  <option value="vdd_as_primary">{{ $tp('config.vdd_prep_vdd_as_primary') }}</option>
+                  <option value="vdd_as_secondary">{{ $tp('config.vdd_prep_vdd_as_secondary') }}</option>
+                  <option value="display_off">{{ $tp('config.vdd_prep_display_off') }}</option>
+                </select>
+                <div class="form-text">
+                  <p style="white-space: pre-line">{{ $tp('config.vdd_prep_desc') }}</p>
+                </div>
               </div>
 
               <!-- Resolution change -->
