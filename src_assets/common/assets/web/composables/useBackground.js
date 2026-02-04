@@ -196,7 +196,7 @@ export function useBackground(options = {}) {
   const getCurrentBackground = () => localStorage.getItem(storageKey) ?? defaultBackground
 
   const setBackground = async (imageUrl) => {
-    document.body.style.background = `url(${imageUrl}) center/contain fixed no-repeat`
+    document.body.style.background = `url(${imageUrl}) center/cover fixed no-repeat`
     if (isLocalImage(imageUrl)) {
       try {
         const colorInfo = await detectImageColorInfo(imageUrl)
