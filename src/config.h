@@ -41,6 +41,8 @@ namespace config {
     bool vdd_keep_enabled;
     /** When true, after stream end if no display is found (headless), create Zako VDD automatically. Default false. */
     bool vdd_headless_create_enabled;
+    /** When true, reuse existing VDD on client switch instead of destroying and recreating. Default true. */
+    bool vdd_reuse;
 
     struct {
       int preset;

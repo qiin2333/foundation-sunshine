@@ -395,6 +395,7 @@ namespace config {
     true,  // nv_sunshine_high_power_mode
     false,  // vdd_keep_enabled
     false,  // vdd_headless_create_enabled
+    false,  // vdd_reuse (default: recreate VDD for each client)
     {},  // nv_legacy
 
     {
@@ -1204,6 +1205,7 @@ namespace config {
     int_between_f(vars, "minimum_fps_target", video.minimum_fps_target, { 0, 1000 });
     bool_f(vars, "vdd_keep_enabled", video.vdd_keep_enabled);
     bool_f(vars, "vdd_headless_create", video.vdd_headless_create_enabled);
+    bool_f(vars, "vdd_reuse", video.vdd_reuse);
 
     // Downscaling quality: "fast" (bilinear+8pt average), "balanced" (bicubic), "high_quality" (future: lanczos)
     string_f(vars, "downscaling_quality", video.downscaling_quality);
