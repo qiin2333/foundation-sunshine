@@ -67,6 +67,8 @@ const displayDevices = computed(() => {
       class="form-check-input"
       id="vdd_reuse"
       v-model="config.vdd_reuse"
+      true-value="enabled"
+      false-value="disabled"
     />
     <label class="form-check-label" for="vdd_reuse">
       {{ $tp('config.vdd_reuse') }}
