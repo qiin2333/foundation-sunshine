@@ -707,7 +707,15 @@ namespace confighttp {
       }
     }
     else {
-      auto data = SimpleWeb::Crypto::Base64::decode(inputTree.get<std::string>("data"));
+      // Limit base64 data size to prevent memory exhaustion
+      // (10MB decoded to about 7.5MB, enough for cover images)
+      constexpr std::size_t MAX_COVER_BASE64_SIZE = 10 * 1024 * 1024;
+      auto base64_str = inputTree.get<std::string>("data");
+      if (base64_str.size() > MAX_COVER_BASE64_SIZE) {
+        outputTree.put("error", "Cover image too large (max 10MB)");
+        return;
+      }
+      auto data = SimpleWeb::Crypto::Base64::decode(base64_str);
 
       std::ofstream imgfile(path, std::ios::binary);
       if (!imgfile.is_open()) {
