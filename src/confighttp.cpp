@@ -624,7 +624,8 @@ namespace confighttp {
       auto &apps_node = fileTree.get_child("apps"s);
       int index = stoi(request->path_match[1]);
 
-      if (index < 0) {
+      int apps_count = static_cast<int>(apps_node.size());
+      if (index < 0 || index >= apps_count) {
         outputTree.put("status", "false");
         outputTree.put("error", "Invalid Index");
         return;
