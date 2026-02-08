@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <atomic>
 #include <map>
 #include <set>
 #include <sstream>
@@ -61,6 +62,10 @@ using json = nlohmann::json;
 namespace confighttp {
   namespace fs = std::filesystem;
   namespace pt = boost::property_tree;
+
+  // Prevent saveApp/deleteApp concurrent write to file_apps causing file corruption, non-blocking
+  // return busy if not acquired
+  static std::atomic<bool> apps_writing { false };
 
   using https_server_t = SimpleWeb::Server<SimpleWeb::HTTPS>;
 
@@ -338,9 +343,12 @@ namespace confighttp {
     getStaticResource(response, request, WEB_DIR "images/logo-sunshine-256.png", "image/png");
   }
 
+  /**
+   * @brief 检查 child 是否是 parent 目录的子路径（防止路径穿越）
+   */
   bool
-  isChildPath(fs::path const &base, fs::path const &query) {
-    auto relPath = fs::relative(base, query);
+  isChildPath(fs::path const &child, fs::path const &parent) {
+    auto relPath = fs::relative(child, parent);
     return *(relPath.begin()) != fs::path("..");
   }
 
@@ -500,6 +508,19 @@ namespace confighttp {
 
     print_req(request);
 
+    // Prevent concurrent write to file_apps causing file corruption
+    bool expected = false;
+    if (!apps_writing.compare_exchange_strong(expected, true)) {
+      pt::ptree outputTree;
+      outputTree.put("status", "false");
+      outputTree.put("error", "Another save operation is in progress");
+      std::ostringstream data;
+      pt::write_json(data, outputTree);
+      response->write(SimpleWeb::StatusCode::client_error_conflict, data.str());
+      return;
+    }
+    auto writing_guard = util::fail_guard([]() { apps_writing = false; });
+
     std::stringstream ss;
     ss << request->content.rdbuf();
 
@@ -528,11 +549,13 @@ namespace confighttp {
         fileTree.push_back(std::make_pair("apps", input_apps_node));
       }
       else {
-        if (input_edit_node.get_child("prep-cmd").empty()) {
+        auto prep_cmd = input_edit_node.get_child_optional("prep-cmd");
+        if (prep_cmd && prep_cmd->empty()) {
           input_edit_node.erase("prep-cmd");
         }
 
-        if (input_edit_node.get_child("detached").empty()) {
+        auto detached = input_edit_node.get_child_optional("detached");
+        if (detached && detached->empty()) {
           input_edit_node.erase("detached");
         }
 
@@ -574,6 +597,19 @@ namespace confighttp {
     if (!authenticate(response, request)) return;
 
     print_req(request);
+
+    // Prevent concurrent write to file_apps causing file corruption
+    bool expected = false;
+    if (!apps_writing.compare_exchange_strong(expected, true)) {
+      pt::ptree outputTree;
+      outputTree.put("status", "false");
+      outputTree.put("error", "Another operation is in progress");
+      std::ostringstream data;
+      pt::write_json(data, outputTree);
+      response->write(SimpleWeb::StatusCode::client_error_conflict, data.str());
+      return;
+    }
+    auto writing_guard = util::fail_guard([]() { apps_writing = false; });
 
     pt::ptree outputTree;
     auto g = util::fail_guard([&]() {
