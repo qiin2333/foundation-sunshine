@@ -964,6 +964,8 @@ namespace confighttp {
       outputTree.put("error", e.what());
       return;
     }
+
+    outputTree.put("status", "true");
   }
 
   void
