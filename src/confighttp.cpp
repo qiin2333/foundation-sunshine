@@ -534,7 +534,6 @@ namespace confighttp {
 
     pt::ptree inputTree, fileTree;
 
-    BOOST_LOG(info) << config::stream.file_apps;
     try {
       // TODO: Input Validation
       pt::read_json(ss, inputTree);
@@ -588,6 +587,7 @@ namespace confighttp {
       return;
     }
 
+    BOOST_LOG(info) << "SaveApp: configuration saved successfully"sv;
     outputTree.put("status", "true");
     proc::refresh(config::stream.file_apps);
   }
@@ -651,6 +651,7 @@ namespace confighttp {
       return;
     }
 
+    BOOST_LOG(info) << "DeleteApp: configuration deleted successfully"sv;
     outputTree.put("status", "true");
     proc::refresh(config::stream.file_apps);
   }
