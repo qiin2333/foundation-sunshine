@@ -881,9 +881,9 @@ namespace confighttp {
         iddOptionTree.add_child("global", global_node);
         iddOptionTree.add_child("resolutions", resolutions_nodes);
       }
-    } catch(...) {
+    } catch(std::exception &e) {
       // 读取失败，创建新的配置
-      BOOST_LOG(warning) << "读取现有VDD配置失败，创建新配置";
+      BOOST_LOG(warning) << "读取现有VDD配置失败，创建新配置: " << e.what();
 
       pt::ptree monitor_node;
       monitor_node.put("count", 1);
@@ -915,7 +915,8 @@ namespace confighttp {
 
       return true;
     }
-    catch(...) {
+    catch(std::exception &e) {
+      BOOST_LOG(warning) << "写入VDD配置失败: " << e.what();
       return false;
     }
   }
