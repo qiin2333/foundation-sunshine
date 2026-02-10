@@ -2980,14 +2980,10 @@ namespace video {
         continue;
       }
 
-      std::shared_ptr<platf::display_t> display;
-      {
-        auto display_guard = ref->display_wp.lock();
-        if (ref->display_wp->expired()) {
-          std::this_thread::sleep_for(20ms);
-          continue;
-        }
-        display = ref->display_wp->lock();
+      auto display = ref->display_wp.lock();
+      if (!display) {
+        std::this_thread::sleep_for(20ms);
+        continue;
       }
 
       const int current_width = display->width;
@@ -3088,6 +3084,13 @@ namespace video {
 
         idr_events->raise(true);
         std::this_thread::sleep_for(100ms);
+      }
+
+      // Short-circuit if resolution change is pending but not yet settled:
+      // wait briefly and re-check instead of starting a new encode session
+      if (resolution_change_pending) {
+        std::this_thread::sleep_for(20ms);
+        continue;
       }
 
       // ==== Phase 3: Create encoder and run ====
