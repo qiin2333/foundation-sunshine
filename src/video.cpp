@@ -2980,10 +2980,14 @@ namespace video {
         continue;
       }
 
-      auto display = ref->display_wp.lock();
-      if (!display) {
-        std::this_thread::sleep_for(20ms);
-        continue;
+      std::shared_ptr<platf::display_t> display;
+      {
+        auto display_guard = ref->display_wp.lock();
+        if (ref->display_wp->expired()) {
+          std::this_thread::sleep_for(20ms);
+          continue;
+        }
+        display = ref->display_wp->lock();
       }
 
       const int current_width = display->width;
