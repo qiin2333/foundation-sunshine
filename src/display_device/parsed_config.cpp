@@ -588,6 +588,24 @@ namespace display_device {
       }
     }
 
+    // 客户端自定义VDD屏幕模式
+    const int custom_vdd_screen_mode = session.custom_vdd_screen_mode;
+    if (custom_vdd_screen_mode != -1) {
+      BOOST_LOG(debug) << "客户端自定义VDD屏幕模式: "sv << custom_vdd_screen_mode;
+      if (custom_vdd_screen_mode == static_cast<int>(parsed_config_t::vdd_prep_e::no_operation)) {
+        parsed_config.vdd_prep = parsed_config_t::vdd_prep_e::no_operation;
+      }
+      else if (custom_vdd_screen_mode == static_cast<int>(parsed_config_t::vdd_prep_e::vdd_as_primary)) {
+        parsed_config.vdd_prep = parsed_config_t::vdd_prep_e::vdd_as_primary;
+      }
+      else if (custom_vdd_screen_mode == static_cast<int>(parsed_config_t::vdd_prep_e::vdd_as_secondary)) {
+        parsed_config.vdd_prep = parsed_config_t::vdd_prep_e::vdd_as_secondary;
+      }
+      else if (custom_vdd_screen_mode == static_cast<int>(parsed_config_t::vdd_prep_e::display_off)) {
+        parsed_config.vdd_prep = parsed_config_t::vdd_prep_e::display_off;
+      }
+    }
+
     // 解析分辨率和刷新率配置
     if (!parse_resolution_option(config, session, parsed_config) ||
         !parse_refresh_rate_option(config, session, parsed_config) ||
