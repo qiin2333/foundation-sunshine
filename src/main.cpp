@@ -148,6 +148,12 @@ main(int argc, char *argv[]) {
     return 0;
   }
 
+  // special case for version command
+  if (config::sunshine.cmd.name == "version"sv) {
+    std::cout << PROJECT_NAME << " version: " << PROJECT_VER << std::endl;
+    return 0;
+  }
+
   auto log_deinit_guard = logging::init(config::sunshine.min_log_level, config::sunshine.log_file, config::sunshine.restore_log);
   if (!log_deinit_guard) {
     BOOST_LOG(error) << "Logging failed to initialize"sv;
