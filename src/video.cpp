@@ -2112,43 +2112,44 @@ namespace video {
     frame->chroma_location = ctx->chroma_sample_location;
 
     // Attach HDR metadata to the AVFrame
-    // Note: HLG (Hybrid Log-Gamma) uses a different approach - it doesn't require
-    // Mastering Display Metadata or Content Light Level metadata like PQ (ST 2084) does.
-    // HLG is designed to be backward compatible with SDR and uses relative luminance.
+    // Both PQ (ST 2084) and HLG (ARIB STD-B67) can carry HDR metadata.
+    // PQ uses absolute luminance and requires static metadata (MDCV, CLL).
+    // HLG uses scene-referred relative luminance but benefits from HDR Vivid (CUVA)
+    // dynamic metadata for enhanced tone mapping on capable displays.
     if (colorspace_is_hdr(colorspace)) {
-      // Only attach static/dynamic HDR metadata for PQ (ST 2084) HDR
-      // HLG doesn't need these metadata - it uses scene-referred relative luminance
-      if (colorspace_is_pq(colorspace)) {
-        SS_HDR_METADATA hdr_metadata;
-        if (disp->get_hdr_metadata(hdr_metadata)) {
-          auto mdm = av_mastering_display_metadata_create_side_data(frame.get());
+      SS_HDR_METADATA hdr_metadata;
+      bool has_metadata = disp->get_hdr_metadata(hdr_metadata);
 
-          mdm->display_primaries[0][0] = av_make_q(hdr_metadata.displayPrimaries[0].x, 50000);
-          mdm->display_primaries[0][1] = av_make_q(hdr_metadata.displayPrimaries[0].y, 50000);
-          mdm->display_primaries[1][0] = av_make_q(hdr_metadata.displayPrimaries[1].x, 50000);
-          mdm->display_primaries[1][1] = av_make_q(hdr_metadata.displayPrimaries[1].y, 50000);
-          mdm->display_primaries[2][0] = av_make_q(hdr_metadata.displayPrimaries[2].x, 50000);
-          mdm->display_primaries[2][1] = av_make_q(hdr_metadata.displayPrimaries[2].y, 50000);
+      if (has_metadata) {
+        // Attach static HDR metadata (Mastering Display Color Volume + Content Light Level)
+        // Required for PQ, optional but beneficial for HLG with HDR Vivid
+        auto mdm = av_mastering_display_metadata_create_side_data(frame.get());
 
-          mdm->white_point[0] = av_make_q(hdr_metadata.whitePoint.x, 50000);
-          mdm->white_point[1] = av_make_q(hdr_metadata.whitePoint.y, 50000);
+        mdm->display_primaries[0][0] = av_make_q(hdr_metadata.displayPrimaries[0].x, 50000);
+        mdm->display_primaries[0][1] = av_make_q(hdr_metadata.displayPrimaries[0].y, 50000);
+        mdm->display_primaries[1][0] = av_make_q(hdr_metadata.displayPrimaries[1].x, 50000);
+        mdm->display_primaries[1][1] = av_make_q(hdr_metadata.displayPrimaries[1].y, 50000);
+        mdm->display_primaries[2][0] = av_make_q(hdr_metadata.displayPrimaries[2].x, 50000);
+        mdm->display_primaries[2][1] = av_make_q(hdr_metadata.displayPrimaries[2].y, 50000);
 
-          mdm->min_luminance = av_make_q(hdr_metadata.minDisplayLuminance, 10000);
-          mdm->max_luminance = av_make_q(hdr_metadata.maxDisplayLuminance, 1);
+        mdm->white_point[0] = av_make_q(hdr_metadata.whitePoint.x, 50000);
+        mdm->white_point[1] = av_make_q(hdr_metadata.whitePoint.y, 50000);
 
-          mdm->has_luminance = hdr_metadata.maxDisplayLuminance != 0 ? 1 : 0;
-          mdm->has_primaries = hdr_metadata.displayPrimaries[0].x != 0 ? 1 : 0;
+        mdm->min_luminance = av_make_q(hdr_metadata.minDisplayLuminance, 10000);
+        mdm->max_luminance = av_make_q(hdr_metadata.maxDisplayLuminance, 1);
 
-          if (hdr_metadata.maxContentLightLevel != 0 || hdr_metadata.maxFrameAverageLightLevel != 0) {
-            auto clm = av_content_light_metadata_create_side_data(frame.get());
+        mdm->has_luminance = hdr_metadata.maxDisplayLuminance != 0 ? 1 : 0;
+        mdm->has_primaries = hdr_metadata.displayPrimaries[0].x != 0 ? 1 : 0;
 
-            clm->MaxCLL = hdr_metadata.maxContentLightLevel;
-            clm->MaxFALL = hdr_metadata.maxFrameAverageLightLevel;
-          }
+        if (hdr_metadata.maxContentLightLevel != 0 || hdr_metadata.maxFrameAverageLightLevel != 0) {
+          auto clm = av_content_light_metadata_create_side_data(frame.get());
 
-          // Add HDR10+ dynamic metadata support
-          // Generate simplified dynamic metadata based on static metadata
-          // In the future, this could be enhanced with per-frame content analysis
+          clm->MaxCLL = hdr_metadata.maxContentLightLevel;
+          clm->MaxFALL = hdr_metadata.maxFrameAverageLightLevel;
+        }
+
+        // HDR10+ dynamic metadata - PQ only (Samsung ST 2094-40, uses absolute luminance)
+        if (colorspace_is_pq(colorspace)) {
           auto hdr10plus = av_dynamic_hdr_plus_create_side_data(frame.get());
           if (hdr10plus) {
             // Set default values for HDR10+
@@ -2200,74 +2201,75 @@ namespace video {
 
             BOOST_LOG(debug) << "Added HDR10+ dynamic metadata to frame";
           }
-
-          // Add HDR Vivid dynamic metadata support
-          auto vivid = av_dynamic_hdr_vivid_create_side_data(frame.get());
-          if (vivid) {
-            // Set default values for HDR Vivid
-            vivid->system_start_code = 0x01;
-            vivid->num_windows = 0x01;  // Single processing window
-
-            // Initialize the first (and only) processing window
-            auto &params = vivid->params[0];
-
-            // Initialize maxrgb values (simplified - use full range)
-            params.minimum_maxrgb = av_make_q(0, 4095);
-            params.average_maxrgb = av_make_q(2047, 4095);  // 0.5
-            params.variance_maxrgb = av_make_q(0, 4095);
-            params.maximum_maxrgb = av_make_q(4095, 4095);  // 1.0
-
-            // Initialize tone mapping parameters (simplified - no tone mapping)
-            params.tone_mapping_mode_flag = 0;
-            params.tone_mapping_param_num = 0;
-
-            // Initialize color saturation mapping (disabled)
-            params.color_saturation_mapping_flag = 0;
-            params.color_saturation_num = 0;
-            for (int j = 0; j < 8; j++) {
-              params.color_saturation_gain[j] = av_make_q(128, 128);  // 1.0 (no adjustment)
-            }
-
-            // Initialize tone mapping params structure (even if not used)
-            for (int i = 0; i < 2; i++) {
-              auto &tm_params = params.tm_params[i];
-              tm_params.targeted_system_display_maximum_luminance = av_make_q(hdr_metadata.maxDisplayLuminance, 1);
-              tm_params.base_enable_flag = 0;
-              tm_params.base_param_m_p = av_make_q(0, 16383);
-              tm_params.base_param_m_m = av_make_q(0, 10);
-              tm_params.base_param_m_a = av_make_q(0, 1023);
-              tm_params.base_param_m_b = av_make_q(0, 1023);
-              tm_params.base_param_m_n = av_make_q(0, 10);
-              tm_params.base_param_k1 = 0;
-              tm_params.base_param_k2 = 0;
-              tm_params.base_param_k3 = 0;
-              tm_params.base_param_Delta_enable_mode = 0;
-              tm_params.base_param_Delta = av_make_q(0, 127);
-              tm_params.three_Spline_enable_flag = 0;
-              tm_params.three_Spline_num = 0;
-              // Initialize three spline parameters
-              for (int j = 0; j < 2; j++) {
-                auto &spline = tm_params.three_spline[j];
-                spline.th_mode = 0;
-                spline.th_enable_mb = av_make_q(0, 255);
-                spline.th_enable = av_make_q(0, 4095);
-                spline.th_delta1 = av_make_q(0, 1023);
-                spline.th_delta2 = av_make_q(0, 1023);
-                spline.enable_strength = av_make_q(0, 255);
-              }
-            }
-
-            BOOST_LOG(debug) << "Added HDR Vivid dynamic metadata to frame";
-          }
         }
-        else {
-          BOOST_LOG(error) << "Couldn't get display hdr metadata when colorspace selection indicates it should have one";
+
+        // HDR Vivid (CUVA HDR / T/UWA 3.137) dynamic metadata - both PQ and HLG
+        // HDR Vivid supports both transfer functions:
+        //   - PQ mode: absolute luminance tone mapping
+        //   - HLG mode: scene-referred relative luminance tone mapping
+        // The CUVA metadata is carried as ITU-T T.35 registered SEI/OBU, independent
+        // of the underlying transfer function.
+        auto vivid = av_dynamic_hdr_vivid_create_side_data(frame.get());
+        if (vivid) {
+          // Set default values for HDR Vivid
+          vivid->system_start_code = 0x01;
+          vivid->num_windows = 0x01;  // Single processing window
+
+          // Initialize the first (and only) processing window
+          auto &params = vivid->params[0];
+
+          // Initialize maxrgb values (simplified - use full range)
+          params.minimum_maxrgb = av_make_q(0, 4095);
+          params.average_maxrgb = av_make_q(2047, 4095);  // 0.5
+          params.variance_maxrgb = av_make_q(0, 4095);
+          params.maximum_maxrgb = av_make_q(4095, 4095);  // 1.0
+
+          // Initialize tone mapping parameters (simplified - no tone mapping)
+          params.tone_mapping_mode_flag = 0;
+          params.tone_mapping_param_num = 0;
+
+          // Initialize color saturation mapping (disabled)
+          params.color_saturation_mapping_flag = 0;
+          params.color_saturation_num = 0;
+          for (int j = 0; j < 8; j++) {
+            params.color_saturation_gain[j] = av_make_q(128, 128);  // 1.0 (no adjustment)
+          }
+
+          // Initialize tone mapping params structure (even if not used)
+          for (int i = 0; i < 2; i++) {
+            auto &tm_params = params.tm_params[i];
+            tm_params.targeted_system_display_maximum_luminance = av_make_q(hdr_metadata.maxDisplayLuminance, 1);
+            tm_params.base_enable_flag = 0;
+            tm_params.base_param_m_p = av_make_q(0, 16383);
+            tm_params.base_param_m_m = av_make_q(0, 10);
+            tm_params.base_param_m_a = av_make_q(0, 1023);
+            tm_params.base_param_m_b = av_make_q(0, 1023);
+            tm_params.base_param_m_n = av_make_q(0, 10);
+            tm_params.base_param_k1 = 0;
+            tm_params.base_param_k2 = 0;
+            tm_params.base_param_k3 = 0;
+            tm_params.base_param_Delta_enable_mode = 0;
+            tm_params.base_param_Delta = av_make_q(0, 127);
+            tm_params.three_Spline_enable_flag = 0;
+            tm_params.three_Spline_num = 0;
+            // Initialize three spline parameters
+            for (int j = 0; j < 2; j++) {
+              auto &spline = tm_params.three_spline[j];
+              spline.th_mode = 0;
+              spline.th_enable_mb = av_make_q(0, 255);
+              spline.th_enable = av_make_q(0, 4095);
+              spline.th_delta1 = av_make_q(0, 1023);
+              spline.th_delta2 = av_make_q(0, 1023);
+              spline.enable_strength = av_make_q(0, 255);
+            }
+          }
+
+          BOOST_LOG(debug) << "Added HDR Vivid dynamic metadata to frame"
+                           << (colorspace_is_hlg(colorspace) ? " (HLG mode)" : " (PQ mode)");
         }
       }
-      else if (colorspace_is_hlg(colorspace)) {
-        // HLG mode - no static/dynamic metadata needed
-        // HLG uses scene-referred luminance and is backward compatible with SDR
-        BOOST_LOG(debug) << "Using HLG HDR mode - no static/dynamic metadata attached";
+      else {
+        BOOST_LOG(error) << "Couldn't get display hdr metadata when colorspace selection indicates it should have one";
       }
     }
 
@@ -2309,8 +2311,10 @@ namespace video {
       return nullptr;
     }
 
-    // Set HDR metadata for NVENC encoder if HDR is enabled
-    if (colorspace_is_pq(encode_device->colorspace) && encode_device->nvenc) {
+    // Set HDR metadata for NVENC encoder if HDR is enabled (both PQ and HLG)
+    // PQ needs mastering display + content light level SEI for proper absolute luminance mapping.
+    // HLG benefits from these SEI for HDR Vivid tone mapping on the decoder side.
+    if (colorspace_is_hdr(encode_device->colorspace) && encode_device->nvenc) {
       SS_HDR_METADATA hdr_metadata;
       if (disp->get_hdr_metadata(hdr_metadata)) {
         nvenc::nvenc_hdr_metadata nvenc_metadata;
@@ -2326,7 +2330,8 @@ namespace video {
         nvenc_metadata.maxContentLightLevel = hdr_metadata.maxContentLightLevel;
         nvenc_metadata.maxFrameAverageLightLevel = hdr_metadata.maxFrameAverageLightLevel;
         encode_device->nvenc->set_hdr_metadata(nvenc_metadata);
-        BOOST_LOG(info) << "NVENC: HDR metadata set - max luminance: " << nvenc_metadata.maxDisplayLuminance << " nits";
+        BOOST_LOG(info) << "NVENC: HDR metadata set - max luminance: " << nvenc_metadata.maxDisplayLuminance
+                        << " nits, mode: " << (colorspace_is_hlg(encode_device->colorspace) ? "HLG" : "PQ");
       }
     }
 
