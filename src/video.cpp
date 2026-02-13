@@ -1680,20 +1680,79 @@ namespace video {
   }
 
   /**
-   * @brief Update per-frame HDR dynamic metadata with real GPU-computed luminance stats.
+   * @brief Temporal EMA (Exponential Moving Average) state for HDR luminance stats.
+   * Prevents frame-to-frame brightness jitter/flicker in tone mapping by smoothing
+   * the raw per-frame GPU statistics over time.
+   */
+  struct hdr_luminance_ema_t {
+    float min_maxrgb = 0.0f;
+    float max_maxrgb = 0.0f;
+    float avg_maxrgb = 0.0f;
+    float percentile_95 = 0.0f;
+    float percentile_99 = 0.0f;
+    bool initialized = false;
+
+    /// EMA smoothing factor: 0.15 = responsive to changes while avoiding flicker.
+    /// Lower α = more smoothing (less flicker, slower adaptation).
+    /// Scene cuts are handled by fast-tracking when the change exceeds a threshold.
+    static constexpr float ALPHA = 0.15f;
+    static constexpr float SCENE_CUT_THRESHOLD = 3.0f;  // Ratio threshold for scene cut detection
+
+    /**
+     * @brief Apply EMA smoothing to raw per-frame stats.
+     * On first frame or scene cuts (>3x luminance change), snaps to current value.
+     * Otherwise applies exponential smoothing: smoothed = α·current + (1-α)·previous.
+     */
+    void
+    update(const platf::hdr_frame_luminance_stats_t &raw) {
+      if (!raw.valid) return;
+
+      if (!initialized) {
+        // First frame: snap to current values
+        min_maxrgb = raw.min_maxrgb;
+        max_maxrgb = raw.max_maxrgb;
+        avg_maxrgb = raw.avg_maxrgb;
+        percentile_95 = raw.percentile_95;
+        percentile_99 = raw.percentile_99;
+        initialized = true;
+        return;
+      }
+
+      // Scene cut detection: if peak luminance changes dramatically, snap immediately
+      float ratio = (max_maxrgb > 1.0f) ? raw.max_maxrgb / max_maxrgb : SCENE_CUT_THRESHOLD + 1.0f;
+      float alpha = (ratio > SCENE_CUT_THRESHOLD || ratio < 1.0f / SCENE_CUT_THRESHOLD)
+                    ? 1.0f  // Scene cut: snap to new values
+                    : ALPHA; // Normal: smooth transition
+
+      min_maxrgb = alpha * raw.min_maxrgb + (1.0f - alpha) * min_maxrgb;
+      max_maxrgb = alpha * raw.max_maxrgb + (1.0f - alpha) * max_maxrgb;
+      avg_maxrgb = alpha * raw.avg_maxrgb + (1.0f - alpha) * avg_maxrgb;
+      percentile_95 = alpha * raw.percentile_95 + (1.0f - alpha) * percentile_95;
+      percentile_99 = alpha * raw.percentile_99 + (1.0f - alpha) * percentile_99;
+    }
+  };
+
+  /**
+   * @brief Update per-frame HDR dynamic metadata with smoothed GPU-computed luminance stats.
    *
    * Called before each avcodec_send_frame() to inject accurate per-frame
    * maxRGB statistics into HDR Vivid and HDR10+ side data.
+   * Uses P95 percentile for peak luminance (more stable than raw max) and
+   * EMA-smoothed values to prevent frame-to-frame flicker.
    *
    * @param frame The AVFrame with pre-allocated dynamic HDR side data
-   * @param stats Per-frame luminance statistics from GPU compute shader
+   * @param ema Temporally-smoothed luminance statistics
    * @param max_display_luminance Display peak luminance in nits (from EDID)
    */
   void
-  update_hdr_dynamic_metadata(AVFrame *frame, const platf::hdr_frame_luminance_stats_t &stats, uint16_t max_display_luminance) {
-    if (!stats.valid || !frame) return;
+  update_hdr_dynamic_metadata(AVFrame *frame, const hdr_luminance_ema_t &ema, uint16_t max_display_luminance) {
+    if (!ema.initialized || !frame) return;
 
     float peak_nits = max_display_luminance > 0 ? static_cast<float>(max_display_luminance) : 1000.0f;
+
+    // Use P95 as the "effective peak" for metadata — more stable than raw max,
+    // avoids single-pixel HDR highlights distorting global tone mapping
+    float effective_max = ema.percentile_95;
 
     // Update HDR Vivid (CUVA) dynamic metadata
     auto vivid_sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_VIVID);
@@ -1702,14 +1761,14 @@ namespace video {
       if (vivid && vivid->num_windows > 0) {
         auto &params = vivid->params[0];
 
-        // Normalize maxRGB stats to [0, 1] range (relative to peak luminance)
-        // CUVA spec uses Q4.12 representation, mapped via AVRational with denominator 4095
-        float min_norm = std::clamp(stats.min_maxrgb / peak_nits, 0.0f, 1.0f);
-        float avg_norm = std::clamp(stats.avg_maxrgb / peak_nits, 0.0f, 1.0f);
-        float max_norm = std::clamp(stats.max_maxrgb / peak_nits, 0.0f, 1.0f);
+        // Normalize to [0, 1] range relative to peak luminance
+        // CUVA spec uses Q4.12 representation via AVRational with denominator 4095
+        float min_norm = std::clamp(ema.min_maxrgb / peak_nits, 0.0f, 1.0f);
+        float avg_norm = std::clamp(ema.avg_maxrgb / peak_nits, 0.0f, 1.0f);
+        float max_norm = std::clamp(effective_max / peak_nits, 0.0f, 1.0f);
 
-        // Compute variance approximation: (max - min) / peak, clamped
-        float variance_norm = std::clamp((stats.max_maxrgb - stats.min_maxrgb) / peak_nits, 0.0f, 1.0f);
+        // Variance: spread between P99 and min, normalized
+        float variance_norm = std::clamp((ema.percentile_99 - ema.min_maxrgb) / peak_nits, 0.0f, 1.0f);
 
         params.minimum_maxrgb = av_make_q(static_cast<int>(min_norm * 4095), 4095);
         params.average_maxrgb = av_make_q(static_cast<int>(avg_norm * 4095), 4095);
@@ -1730,10 +1789,9 @@ namespace video {
       if (hdr10plus && hdr10plus->num_windows > 0) {
         auto &params = hdr10plus->params[0];
 
-        // HDR10+ maxscl: normalized to [0, 1] relative to peak display luminance
-        // All three channels use the same max value (conservative approach)
-        float max_norm = std::clamp(stats.max_maxrgb / peak_nits, 0.0f, 1.0f);
-        float avg_norm = std::clamp(stats.avg_maxrgb / peak_nits, 0.0f, 1.0f);
+        // HDR10+ maxscl: use P95 for stability
+        float max_norm = std::clamp(effective_max / peak_nits, 0.0f, 1.0f);
+        float avg_norm = std::clamp(ema.avg_maxrgb / peak_nits, 0.0f, 1.0f);
 
         params.maxscl[0] = av_make_q(static_cast<int>(max_norm * 100000), 100000);
         params.maxscl[1] = av_make_q(static_cast<int>(max_norm * 100000), 100000);
@@ -1744,6 +1802,9 @@ namespace video {
       }
     }
   }
+
+  // Per-session EMA state for temporal smoothing of HDR luminance stats
+  static thread_local hdr_luminance_ema_t hdr_ema_state;
 
   int
   encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
@@ -1756,10 +1817,12 @@ namespace video {
     auto &vps = session.vps;
 
     // Update per-frame HDR dynamic metadata with GPU-computed luminance stats
+    // Apply temporal EMA smoothing to prevent brightness jitter between frames
     {
-      auto &stats = session.device->hdr_luminance_stats;
-      if (stats.valid) {
-        // Use maxDisplayLuminance from MDCV side data if available, else default 1000
+      auto &raw_stats = session.device->hdr_luminance_stats;
+      if (raw_stats.valid) {
+        hdr_ema_state.update(raw_stats);
+
         uint16_t max_lum = 1000;
         auto mdm_sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
         if (mdm_sd) {
@@ -1768,7 +1831,7 @@ namespace video {
             max_lum = static_cast<uint16_t>(av_q2d(mdm->max_luminance));
           }
         }
-        update_hdr_dynamic_metadata(frame, stats, max_lum);
+        update_hdr_dynamic_metadata(frame, hdr_ema_state, max_lum);
       }
     }
 
