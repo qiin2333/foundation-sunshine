@@ -143,6 +143,7 @@ namespace platf::dxgi {
   blob_t cursor_vs_hlsl;
   blob_t simple_cursor_vs_hlsl;
   blob_t simple_cursor_ps_hlsl;
+  blob_t hdr_luminance_analysis_cs_hlsl;
 
   struct img_d3d_t: public platf::img_t {
     // These objects are owned by the display_t's ID3D11Device
@@ -402,6 +403,11 @@ namespace platf::dxgi {
     return compile_shader(file, "main_vs", "vs_5_0");
   }
 
+  blob_t
+  compile_compute_shader(LPCSTR file) {
+    return compile_shader(file, "main_cs", "cs_5_0");
+  }
+
   class d3d_base_encode_device final {
   public:
     int
@@ -464,6 +470,13 @@ namespace platf::dxgi {
 
         // Draw captured frame
         draw(img_ctx.encoder_input_res, out_Y_or_YUV_viewports, out_UV_viewport);
+
+        // Dispatch HDR luminance analysis on the scRGB FP16 input texture
+        // This runs AFTER the YUV conversion draw but BEFORE releasing the mutex,
+        // so the texture is still valid. Uses async readback (1-frame delay).
+        if (hdr_analysis_enabled && img.format == DXGI_FORMAT_R16G16B16A16_FLOAT) {
+          dispatch_hdr_analysis(img_ctx.encoder_input_res.get());
+        }
 
         // Release encoder mutex to allow capture code to reuse this image
         img_ctx.encoder_mutex->ReleaseSync(0);
@@ -931,6 +944,14 @@ namespace platf::dxgi {
       device_ctx->PSSetSamplers(0, 2, samplers);
       device_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+      // Initialize HDR luminance analyzer for HDR formats (P010, Y410, R16_UINT)
+      // The analyzer is optional — if it fails, HDR will still work with static metadata only
+      if (format == DXGI_FORMAT_P010 || format == DXGI_FORMAT_Y410 || format == DXGI_FORMAT_R16_UINT) {
+        if (init_hdr_luminance_analyzer() != 0) {
+          BOOST_LOG(warning) << "HDR luminance analyzer init failed, dynamic metadata will use defaults";
+        }
+      }
+
       return 0;
     }
 
@@ -1074,6 +1095,192 @@ namespace platf::dxgi {
     device_ctx_t device_ctx;
 
     texture2d_t output_texture;
+
+    // ===== HDR Luminance Analyzer =====
+    // Compute shader for per-frame luminance analysis (CUVA Vivid / HDR10+ metadata)
+    cs_t hdr_analysis_cs;
+    buf_t hdr_group_results_buf;           // RWStructuredBuffer UAV (default usage)
+    uav_t hdr_group_results_uav;           // UAV view for CS output
+    buf_t hdr_staging_buf;                 // Staging buffer for CPU readback
+    uint32_t hdr_num_groups = 0;           // Number of thread groups dispatched
+    bool hdr_analysis_pending = false;     // Whether we have results ready to read
+    bool hdr_analysis_enabled = false;     // Whether HDR analysis is initialized
+
+    // Per-group result structure (must match HLSL GroupResult)
+    struct GroupResult {
+      float minMaxRGB;
+      float maxMaxRGB;
+      float sumMaxRGB;
+      uint32_t pixelCount;
+    };
+
+    /**
+     * @brief Initialize the HDR luminance analysis compute pipeline.
+     * Called once during encode device init for HDR colorspaces.
+     * @return 0 on success, -1 on failure (non-fatal, analysis will be disabled)
+     */
+    int
+    init_hdr_luminance_analyzer() {
+      if (!hdr_luminance_analysis_cs_hlsl) {
+        BOOST_LOG(warning) << "HDR luminance analysis CS not compiled, skipping init";
+        return -1;
+      }
+
+      // Create compute shader
+      HRESULT status = device->CreateComputeShader(
+        hdr_luminance_analysis_cs_hlsl->GetBufferPointer(),
+        hdr_luminance_analysis_cs_hlsl->GetBufferSize(),
+        nullptr,
+        &hdr_analysis_cs);
+      if (FAILED(status)) {
+        BOOST_LOG(warning) << "Failed to create HDR analysis compute shader: " << util::log_hex(status);
+        return -1;
+      }
+
+      // Calculate number of groups based on display resolution
+      // Groups are 16x16 threads, one thread per pixel
+      uint32_t width = display->width;
+      uint32_t height = display->height;
+      uint32_t groups_x = (width + 15) / 16;
+      uint32_t groups_y = (height + 15) / 16;
+      hdr_num_groups = groups_x * groups_y;
+
+      // Create structured buffer for per-group results (D3D11_USAGE_DEFAULT + UAV)
+      D3D11_BUFFER_DESC buf_desc = {};
+      buf_desc.ByteWidth = hdr_num_groups * sizeof(GroupResult);
+      buf_desc.Usage = D3D11_USAGE_DEFAULT;
+      buf_desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+      buf_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+      buf_desc.StructureByteStride = sizeof(GroupResult);
+
+      status = device->CreateBuffer(&buf_desc, nullptr, &hdr_group_results_buf);
+      if (FAILED(status)) {
+        BOOST_LOG(warning) << "Failed to create HDR group results buffer: " << util::log_hex(status);
+        return -1;
+      }
+
+      // Create UAV for the structured buffer
+      D3D11_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+      uav_desc.Format = DXGI_FORMAT_UNKNOWN;
+      uav_desc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+      uav_desc.Buffer.NumElements = hdr_num_groups;
+
+      status = device->CreateUnorderedAccessView(hdr_group_results_buf.get(), &uav_desc, &hdr_group_results_uav);
+      if (FAILED(status)) {
+        BOOST_LOG(warning) << "Failed to create HDR UAV: " << util::log_hex(status);
+        return -1;
+      }
+
+      // Create staging buffer for async CPU readback
+      D3D11_BUFFER_DESC staging_desc = {};
+      staging_desc.ByteWidth = hdr_num_groups * sizeof(GroupResult);
+      staging_desc.Usage = D3D11_USAGE_STAGING;
+      staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+      status = device->CreateBuffer(&staging_desc, nullptr, &hdr_staging_buf);
+      if (FAILED(status)) {
+        BOOST_LOG(warning) << "Failed to create HDR staging buffer: " << util::log_hex(status);
+        return -1;
+      }
+
+      hdr_analysis_enabled = true;
+      BOOST_LOG(info) << "HDR luminance analyzer initialized: " << width << "x" << height
+                      << ", " << hdr_num_groups << " groups (" << groups_x << "x" << groups_y << ")";
+      return 0;
+    }
+
+    /**
+     * @brief Dispatch the luminance analysis CS for the current frame.
+     * Uses async readback: dispatches CS + copies to staging on this frame,
+     * reads staging on next frame. 1-frame delay but zero GPU sync stall.
+     * @param input_srv SRV of the scRGB FP16 capture texture
+     */
+    void
+    dispatch_hdr_analysis(ID3D11ShaderResourceView *input_srv) {
+      if (!hdr_analysis_enabled || !input_srv) return;
+
+      // Read results from PREVIOUS frame (1-frame delay for async readback)
+      if (hdr_analysis_pending) {
+        read_hdr_analysis_results();
+      }
+
+      // Unbind render targets to avoid resource hazard (SRV vs RTV conflict)
+      // The PS pipeline may have bound the same texture as SRV for PS
+      ID3D11RenderTargetView *null_rtv = nullptr;
+      device_ctx->OMSetRenderTargets(1, &null_rtv, nullptr);
+
+      // Dispatch compute shader for THIS frame
+      device_ctx->CSSetShader(hdr_analysis_cs.get(), nullptr, 0);
+      device_ctx->CSSetShaderResources(0, 1, &input_srv);
+      ID3D11UnorderedAccessView *uav = hdr_group_results_uav.get();
+      device_ctx->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
+
+      uint32_t groups_x = (display->width + 15) / 16;
+      uint32_t groups_y = (display->height + 15) / 16;
+      device_ctx->Dispatch(groups_x, groups_y, 1);
+
+      // Unbind CS resources
+      ID3D11ShaderResourceView *null_srv = nullptr;
+      ID3D11UnorderedAccessView *null_uav = nullptr;
+      device_ctx->CSSetShaderResources(0, 1, &null_srv);
+      device_ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, nullptr);
+      device_ctx->CSSetShader(nullptr, nullptr, 0);
+
+      // Copy results to staging buffer for CPU readback
+      device_ctx->CopyResource(hdr_staging_buf.get(), hdr_group_results_buf.get());
+
+      hdr_analysis_pending = true;
+    }
+
+    /**
+     * @brief Read HDR analysis results from the staging buffer (previous frame).
+     * Performs CPU-side final reduction across all thread groups.
+     */
+    void
+    read_hdr_analysis_results() {
+      D3D11_MAPPED_SUBRESOURCE mapped = {};
+      HRESULT status = device_ctx->Map(hdr_staging_buf.get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+
+      if (status == DXGI_ERROR_WAS_STILL_DRAWING) {
+        // GPU hasn't finished yet — skip this readback, try next frame
+        return;
+      }
+
+      if (FAILED(status)) {
+        BOOST_LOG(debug) << "HDR staging Map failed: " << util::log_hex(status);
+        return;
+      }
+
+      auto *groups = reinterpret_cast<const GroupResult *>(mapped.pData);
+
+      // CPU final reduction across all groups
+      float global_min = 100000.0f;
+      float global_max = 0.0f;
+      double global_sum = 0.0;
+      uint64_t global_count = 0;
+
+      for (uint32_t i = 0; i < hdr_num_groups; i++) {
+        if (groups[i].pixelCount > 0) {
+          global_min = std::min(global_min, groups[i].minMaxRGB);
+          global_max = std::max(global_max, groups[i].maxMaxRGB);
+          global_sum += static_cast<double>(groups[i].sumMaxRGB);
+          global_count += groups[i].pixelCount;
+        }
+      }
+
+      device_ctx->Unmap(hdr_staging_buf.get(), 0);
+
+      // Store results in the encode device's luminance stats
+      if (global_count > 0) {
+        hdr_luminance_stats_out.min_maxrgb = global_min;
+        hdr_luminance_stats_out.max_maxrgb = global_max;
+        hdr_luminance_stats_out.avg_maxrgb = static_cast<float>(global_sum / global_count);
+        hdr_luminance_stats_out.valid = true;
+      }
+    }
+
+    // Intermediate storage for luminance stats (written by readback, consumed by convert caller)
+    platf::hdr_frame_luminance_stats_t hdr_luminance_stats_out;
   };
 
   class d3d_avcodec_encode_device_t: public avcodec_encode_device_t {
@@ -1087,7 +1294,10 @@ namespace platf::dxgi {
 
     int
     convert(platf::img_t &img_base) override {
-      return base.convert(img_base);
+      int result = base.convert(img_base);
+      // Propagate per-frame luminance stats from GPU analyzer to encode device
+      hdr_luminance_stats = base.hdr_luminance_stats_out;
+      return result;
     }
 
     void
@@ -1209,7 +1419,10 @@ namespace platf::dxgi {
 
     int
     convert(platf::img_t &img_base) override {
-      return base.convert(img_base);
+      int result = base.convert(img_base);
+      // Propagate per-frame luminance stats from GPU analyzer to encode device
+      hdr_luminance_stats = base.hdr_luminance_stats_out;
+      return result;
     }
 
   private:
@@ -2402,6 +2615,12 @@ namespace platf::dxgi {
     compile_vertex_shader_helper(cursor_vs);
     compile_pixel_shader_helper(simple_cursor_ps);
     compile_vertex_shader_helper(simple_cursor_vs);
+
+    // Compile HDR luminance analysis compute shader (optional, non-fatal if fails)
+    hdr_luminance_analysis_cs_hlsl = compile_compute_shader(SUNSHINE_SHADERS_DIR "/hdr_luminance_analysis_cs.hlsl");
+    if (!hdr_luminance_analysis_cs_hlsl) {
+      BOOST_LOG(warning) << "Failed to compile HDR luminance analysis CS, per-frame HDR metadata will use defaults";
+    }
 
     BOOST_LOG(debug) << "Compiled shaders"sv;
 

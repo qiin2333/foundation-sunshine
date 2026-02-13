@@ -3,6 +3,7 @@
  * @brief Definitions for video.
  */
 // standard includes
+#include <algorithm>
 #include <atomic>
 #include <bitset>
 #include <functional>
@@ -1678,6 +1679,72 @@ namespace video {
     }
   }
 
+  /**
+   * @brief Update per-frame HDR dynamic metadata with real GPU-computed luminance stats.
+   *
+   * Called before each avcodec_send_frame() to inject accurate per-frame
+   * maxRGB statistics into HDR Vivid and HDR10+ side data.
+   *
+   * @param frame The AVFrame with pre-allocated dynamic HDR side data
+   * @param stats Per-frame luminance statistics from GPU compute shader
+   * @param max_display_luminance Display peak luminance in nits (from EDID)
+   */
+  void
+  update_hdr_dynamic_metadata(AVFrame *frame, const platf::hdr_frame_luminance_stats_t &stats, uint16_t max_display_luminance) {
+    if (!stats.valid || !frame) return;
+
+    float peak_nits = max_display_luminance > 0 ? static_cast<float>(max_display_luminance) : 1000.0f;
+
+    // Update HDR Vivid (CUVA) dynamic metadata
+    auto vivid_sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_VIVID);
+    if (vivid_sd) {
+      auto *vivid = reinterpret_cast<AVDynamicHDRVivid *>(vivid_sd->data);
+      if (vivid && vivid->num_windows > 0) {
+        auto &params = vivid->params[0];
+
+        // Normalize maxRGB stats to [0, 1] range (relative to peak luminance)
+        // CUVA spec uses Q4.12 representation, mapped via AVRational with denominator 4095
+        float min_norm = std::clamp(stats.min_maxrgb / peak_nits, 0.0f, 1.0f);
+        float avg_norm = std::clamp(stats.avg_maxrgb / peak_nits, 0.0f, 1.0f);
+        float max_norm = std::clamp(stats.max_maxrgb / peak_nits, 0.0f, 1.0f);
+
+        // Compute variance approximation: (max - min) / peak, clamped
+        float variance_norm = std::clamp((stats.max_maxrgb - stats.min_maxrgb) / peak_nits, 0.0f, 1.0f);
+
+        params.minimum_maxrgb = av_make_q(static_cast<int>(min_norm * 4095), 4095);
+        params.average_maxrgb = av_make_q(static_cast<int>(avg_norm * 4095), 4095);
+        params.variance_maxrgb = av_make_q(static_cast<int>(variance_norm * 4095), 4095);
+        params.maximum_maxrgb = av_make_q(static_cast<int>(max_norm * 4095), 4095);
+
+        // Update targeted display luminance in tone mapping params
+        for (int i = 0; i < 2; i++) {
+          params.tm_params[i].targeted_system_display_maximum_luminance = av_make_q(max_display_luminance, 1);
+        }
+      }
+    }
+
+    // Update HDR10+ dynamic metadata
+    auto hdr10plus_sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+    if (hdr10plus_sd) {
+      auto *hdr10plus = reinterpret_cast<AVDynamicHDRPlus *>(hdr10plus_sd->data);
+      if (hdr10plus && hdr10plus->num_windows > 0) {
+        auto &params = hdr10plus->params[0];
+
+        // HDR10+ maxscl: normalized to [0, 1] relative to peak display luminance
+        // All three channels use the same max value (conservative approach)
+        float max_norm = std::clamp(stats.max_maxrgb / peak_nits, 0.0f, 1.0f);
+        float avg_norm = std::clamp(stats.avg_maxrgb / peak_nits, 0.0f, 1.0f);
+
+        params.maxscl[0] = av_make_q(static_cast<int>(max_norm * 100000), 100000);
+        params.maxscl[1] = av_make_q(static_cast<int>(max_norm * 100000), 100000);
+        params.maxscl[2] = av_make_q(static_cast<int>(max_norm * 100000), 100000);
+        params.average_maxrgb = av_make_q(static_cast<int>(avg_norm * 100000), 100000);
+
+        hdr10plus->targeted_system_display_maximum_luminance = av_make_q(max_display_luminance, 1);
+      }
+    }
+  }
+
   int
   encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
     auto &frame = session.device->frame;
@@ -1687,6 +1754,23 @@ namespace video {
 
     auto &sps = session.sps;
     auto &vps = session.vps;
+
+    // Update per-frame HDR dynamic metadata with GPU-computed luminance stats
+    {
+      auto &stats = session.device->hdr_luminance_stats;
+      if (stats.valid) {
+        // Use maxDisplayLuminance from MDCV side data if available, else default 1000
+        uint16_t max_lum = 1000;
+        auto mdm_sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+        if (mdm_sd) {
+          auto *mdm = reinterpret_cast<AVMasteringDisplayMetadata *>(mdm_sd->data);
+          if (mdm && mdm->has_luminance) {
+            max_lum = static_cast<uint16_t>(av_q2d(mdm->max_luminance));
+          }
+        }
+        update_hdr_dynamic_metadata(frame, stats, max_lum);
+      }
+    }
 
     // send the frame to the encoder
     auto ret = avcodec_send_frame(ctx.get(), frame);
