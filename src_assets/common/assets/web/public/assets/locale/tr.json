@@ -661,6 +661,7 @@
     "step0_title": "Dil",
     "step1_description": "Yayınlanacak ekranı seçin",
     "step1_title": "Ekran Seçimi",
+    "step1_vdd_intro": "Temel Ekran (VDD), Sunshine Foundation'ın yerleşik akıllı sanal ekranıdır ve herhangi bir çözünürlük, kare hızı ve HDR optimizasyonunu destekler. Ekran kapalı akış ve genişletilmiş ekran akışı için tercih edilen seçenektir.",
     "step2_description": "Grafik adaptörünüzü seçin",
     "step2_title": "Adaptör Seç",
     "step3_description": "Görüntü cihazı hazırlık stratejisini seçin",

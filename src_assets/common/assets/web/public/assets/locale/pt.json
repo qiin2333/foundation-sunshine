@@ -661,6 +661,7 @@
     "step0_title": "Language",
     "step1_description": "Choose the display to stream",
     "step1_title": "Display Selection",
+    "step1_vdd_intro": "O ecrã base (VDD) é o ecrã virtual inteligente integrado do Sunshine Foundation, que suporta qualquer resolução, taxa de fotogramas e otimização HDR. É a escolha preferida para streaming com ecrã desligado e streaming de ecrã estendido.",
     "step2_description": "Choose your graphics adapter",
     "step2_title": "Select Adapter",
     "step3_description": "Choose display device preparation strategy",

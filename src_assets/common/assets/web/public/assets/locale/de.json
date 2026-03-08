@@ -661,6 +661,7 @@
     "step0_title": "Sprache",
     "step1_description": "Wählen Sie die zu streamende Anzeige",
     "step1_title": "Anzeigeauswahl",
+    "step1_vdd_intro": "Das Basis-Display (VDD) ist das integrierte intelligente virtuelle Display von Sunshine Foundation. Es unterstützt beliebige Auflösungen, Bildraten und HDR-Optimierung und ist die bevorzugte Wahl für Streaming bei ausgeschaltetem Bildschirm und erweitertes Display-Streaming.",
     "step2_description": "Wählen Sie Ihren Grafikadapter",
     "step2_title": "Adapter auswählen",
     "step3_description": "Wählen Sie die Strategie zur Vorbereitung des Anzeigegeräts",

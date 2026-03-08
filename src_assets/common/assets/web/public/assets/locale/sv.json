@@ -661,6 +661,7 @@
     "step0_title": "Språk",
     "step1_description": "Välj skärmen att strömma",
     "step1_title": "Skärmval",
+    "step1_vdd_intro": "Basdisplayen (VDD) är Sunshine Foundations inbyggda smarta virtuella display som stöder valfri upplösning, bildfrekvens och HDR-optimering. Det är det föredragna valet för streaming med avstängd skärm och utökad display-streaming.",
     "step2_description": "Välj din grafikadapter",
     "step2_title": "Välj adapter",
     "step3_description": "Välj förberedelsestrategi för bildskärmsenhet",

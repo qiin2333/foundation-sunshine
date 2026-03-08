@@ -661,6 +661,7 @@
     "step0_title": "Language",
     "step1_description": "Choose the display to stream",
     "step1_title": "Display Selection",
+    "step1_vdd_intro": "Wyświetlacz bazowy (VDD) to wbudowany inteligentny wirtualny wyświetlacz Sunshine Foundation, obsługujący dowolną rozdzielczość, liczbę klatek na sekundę i optymalizację HDR. Jest preferowanym wyborem do streamingu z wyłączonym ekranem i streamingu na rozszerzony wyświetlacz.",
     "step2_description": "Choose your graphics adapter",
     "step2_title": "Select Adapter",
     "step3_description": "Choose display device preparation strategy",

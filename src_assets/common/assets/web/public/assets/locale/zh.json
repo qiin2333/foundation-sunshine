@@ -661,6 +661,7 @@
     "step0_title": "选择语言",
     "step1_description": "选择要串流的显示器",
     "step1_title": "串流显示器",
+    "step1_vdd_intro": "基地显示器为Sunshine基地版内置的智慧显示屏，支持任意分辨率、帧率和HDR优化，是息屏串流、副屏串流的首选。",
     "step2_description": "选择您的显卡适配器",
     "step2_title": "选择显卡",
     "step3_description": "选择显示器组合策略",

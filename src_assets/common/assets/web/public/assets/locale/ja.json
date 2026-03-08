@@ -661,6 +661,7 @@
     "step0_title": "Language",
     "step1_description": "Choose the display to stream",
     "step1_title": "Display Selection",
+    "step1_vdd_intro": "ベースディスプレイ（VDD）はSunshine Foundation内蔵のスマート仮想ディスプレイで、任意の解像度・フレームレート・HDR最適化をサポートします。画面オフストリーミングや拡張ディスプレイストリーミングに最適です。",
     "step2_description": "Choose your graphics adapter",
     "step2_title": "Select Adapter",
     "step3_description": "Choose display device preparation strategy",

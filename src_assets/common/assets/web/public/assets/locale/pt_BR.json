@@ -661,6 +661,7 @@
     "step0_title": "Idioma",
     "step1_description": "Escolha a tela para transmitir",
     "step1_title": "Seleção de Tela",
+    "step1_vdd_intro": "A tela base (VDD) é a tela virtual inteligente integrada do Sunshine Foundation, que suporta qualquer resolução, taxa de quadros e otimização HDR. É a escolha preferida para streaming com tela desligada e streaming de tela estendida.",
     "step2_description": "Escolha seu adaptador gráfico",
     "step2_title": "Selecionar Adaptador",
     "step3_description": "Escolha a estratégia de preparação do dispositivo de exibição",

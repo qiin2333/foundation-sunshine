@@ -661,6 +661,7 @@
     "step0_title": "Language",
     "step1_description": "Choose the display to stream",
     "step1_title": "Display Selection",
+    "step1_vdd_intro": "기지 디스플레이(VDD)는 Sunshine Foundation에 내장된 스마트 가상 디스플레이로, 모든 해상도, 프레임 레이트 및 HDR 최적화를 지원합니다. 화면 끄기 스트리밍 및 확장 디스플레이 스트리밍에 최적의 선택입니다.",
     "step2_description": "Choose your graphics adapter",
     "step2_title": "Select Adapter",
     "step3_description": "Choose display device preparation strategy",

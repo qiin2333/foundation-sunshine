@@ -661,6 +661,7 @@
     "step0_title": "語言",
     "step1_description": "選擇要串流的顯示器",
     "step1_title": "顯示器選擇",
+    "step1_vdd_intro": "基地顯示器為Sunshine基地版內建的智慧顯示螢幕，支援任意解析度、幀率和HDR最佳化，是息屏串流、副屏串流的首選。",
     "step2_description": "選擇您的圖形介面卡",
     "step2_title": "選擇介面卡",
     "step3_description": "選擇顯示器裝置準備策略",

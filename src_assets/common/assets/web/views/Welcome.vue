@@ -96,7 +96,7 @@
                         :placeholder="$t('welcome.password')"
                         required
                       />
-                      <button class="btn btn-outline-secondary toggle-password" type="button" @click="showPassword = !showPassword">
+                      <button class="btn btn-outline-secondary toggle-password" type="button" @click="showPassword = !showPassword" :aria-label="showPassword ? $t('welcome.hide_password') : $t('welcome.show_password')">
                         <i :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                       </button>
                     </div>
@@ -117,7 +117,7 @@
                         :placeholder="$t('welcome.confirm_password')"
                         required
                       />
-                      <button class="btn btn-outline-secondary toggle-password" type="button" @click="showConfirmPassword = !showConfirmPassword">
+                      <button class="btn btn-outline-secondary toggle-password" type="button" @click="showConfirmPassword = !showConfirmPassword" :aria-label="showConfirmPassword ? $t('welcome.hide_password') : $t('welcome.show_password')">
                         <i :class="showConfirmPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                       </button>
                     </div>

@@ -661,6 +661,7 @@
     "step0_title": "Language",
     "step1_description": "Choose the display to stream",
     "step1_title": "Display Selection",
+    "step1_vdd_intro": "Базовый дисплей (VDD) — встроенный интеллектуальный виртуальный дисплей Sunshine Foundation, поддерживающий любое разрешение, частоту кадров и оптимизацию HDR. Идеальный выбор для стриминга с выключенным экраном и стриминга на расширенный дисплей.",
     "step2_description": "Choose your graphics adapter",
     "step2_title": "Select Adapter",
     "step3_description": "Choose display device preparation strategy",
