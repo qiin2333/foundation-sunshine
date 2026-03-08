@@ -106,11 +106,10 @@
                     <label for="confirmPasswordInput" class="form-label">
                       <i class="fas fa-check-circle me-2"></i>{{ $t('welcome.confirm_password') }}
                     </label>
-                    <div class="input-group">
+                    <div class="input-group" :class="{ 'is-invalid': !passwordsMatch && passwordData.confirmNewPassword }">
                       <input
                         :type="showConfirmPassword ? 'text' : 'password'"
                         class="form-control"
-                        :class="{ 'is-invalid': !passwordsMatch && passwordData.confirmNewPassword }"
                         id="confirmPasswordInput"
                         autocomplete="new-password"
                         v-model="passwordData.confirmNewPassword"
