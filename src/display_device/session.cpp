@@ -677,7 +677,7 @@ namespace display_device {
 
   void
   session_t::start_polling_restore(revert_reason_e reason) {
-    polling_retry_count_ = 0;  // 重置计数器
+    polling_retry_count_.store(0, boost::memory_order_relaxed);  // 重置计数器
     const int max_retries = 20;
 
     timer->setup_timer([this, reason, max_retries]() {
@@ -688,14 +688,14 @@ namespace display_device {
       }
       
       if (settings.is_changing_settings_going_to_fail()) {
-        polling_retry_count_++;
-        if (polling_retry_count_ >= max_retries) {
+        const int current_count = polling_retry_count_.fetch_add(1, boost::memory_order_relaxed) + 1;
+        if (current_count >= max_retries) {
           BOOST_LOG(warning) << "已达到最大重试次数，停止尝试恢复显示设置";
           pending_restore_ = false;
           clear_vdd_state();
           return true;
         }
-        BOOST_LOG(warning) << "Timer: 仍在等待CCD恢复... (Count: " << polling_retry_count_ << "/" << max_retries << ")";
+        BOOST_LOG(warning) << "Timer: 仍在等待CCD恢复... (Count: " << current_count << "/" << max_retries << ")";
         return false;
       }
 
