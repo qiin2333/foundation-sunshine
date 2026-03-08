@@ -331,6 +331,12 @@ namespace display_device {
 
     bool
     destroy_vdd_monitor() {
+      // 如果VDD已不存在，直接返回成功
+      if (find_device_by_friendlyname(ZAKO_NAME).empty()) {
+        BOOST_LOG(debug) << "VDD设备已不存在，跳过销毁";
+        return true;
+      }
+
       std::string response;
       if (!execute_pipe_command(kVddPipeName, L"DESTROYMONITOR", &response)) {
         BOOST_LOG(error) << "销毁虚拟显示器失败";
