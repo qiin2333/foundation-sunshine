@@ -746,6 +746,7 @@
     "login": "Anmelden",
     "network_error": "Netzwerkfehler, bitte überprüfen Sie Ihre Verbindung",
     "password": "Passwort",
+    "password_match": "Passwörter stimmen überein",
     "password_mismatch": "Passwörter stimmen nicht überein",
     "server_error": "Serverfehler",
     "show_password": "Passwort anzeigen",

@@ -746,6 +746,7 @@
     "login": "Giriş",
     "network_error": "Ağ hatası, lütfen bağlantınızı kontrol edin",
     "password": "Şifre",
+    "password_match": "Şifreler eşleşiyor",
     "password_mismatch": "Şifreler eşleşmiyor",
     "server_error": "Sunucu hatası",
     "show_password": "Şifreyi göster",

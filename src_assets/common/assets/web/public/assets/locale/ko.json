@@ -746,6 +746,7 @@
     "login": "로그인",
     "network_error": "네트워크 오류, 연결을 확인하세요",
     "password": "비밀번호",
+    "password_match": "비밀번호가 일치합니다",
     "password_mismatch": "비밀번호가 일치하지 않습니다",
     "server_error": "서버 오류",
     "show_password": "비밀번호 표시",

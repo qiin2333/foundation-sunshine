@@ -746,6 +746,7 @@
     "login": "Авторизація",
     "network_error": "Помилка мережі, перевірте з'єднання",
     "password": "Пароль",
+    "password_match": "Паролі збігаються",
     "password_mismatch": "Паролі не співпадають",
     "server_error": "Помилка сервера",
     "show_password": "Показати пароль",

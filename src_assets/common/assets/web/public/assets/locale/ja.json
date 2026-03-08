@@ -746,6 +746,7 @@
     "login": "ログイン",
     "network_error": "ネットワークエラー、接続を確認してください",
     "password": "パスワード",
+    "password_match": "パスワードが一致しました",
     "password_mismatch": "パスワードが一致しません",
     "server_error": "サーバーエラー",
     "show_password": "パスワードを表示",

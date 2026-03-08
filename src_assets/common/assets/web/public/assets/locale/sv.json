@@ -746,6 +746,7 @@
     "login": "Inloggning",
     "network_error": "Nätverksfel, kontrollera din anslutning",
     "password": "Lösenord",
+    "password_match": "Lösenorden matchar",
     "password_mismatch": "Lösenorden matchar inte",
     "server_error": "Serverfel",
     "show_password": "Visa lösenord",

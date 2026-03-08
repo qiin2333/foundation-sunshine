@@ -746,6 +746,7 @@
     "login": "Iniciar sesión",
     "network_error": "Error de red, por favor verifique su conexión",
     "password": "Contraseña",
+    "password_match": "Las contraseñas coinciden",
     "password_mismatch": "Las contraseñas no coinciden",
     "server_error": "Error del servidor",
     "show_password": "Mostrar contraseña",

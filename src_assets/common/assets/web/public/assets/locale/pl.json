@@ -746,6 +746,7 @@
     "login": "Login",
     "network_error": "Błąd sieci, sprawdź połączenie",
     "password": "Hasło",
+    "password_match": "Hasła się zgadzają",
     "password_mismatch": "Hasła nie pasują",
     "server_error": "Błąd serwera",
     "show_password": "Pokaż hasło",

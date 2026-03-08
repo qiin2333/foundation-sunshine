@@ -746,6 +746,7 @@
     "login": "Вход",
     "network_error": "Ошибка сети, пожалуйста проверьте соединение",
     "password": "Пароль",
+    "password_match": "Пароли совпадают",
     "password_mismatch": "Пароли не совпадают",
     "server_error": "Ошибка сервера",
     "show_password": "Показать пароль",

@@ -754,6 +754,7 @@
     "login": "Login",
     "network_error": "Network error, please check your connection",
     "password": "Password",
+    "password_match": "Passwords match",
     "password_mismatch": "Passwords do not match",
     "server_error": "Server error",
     "show_password": "Show password",

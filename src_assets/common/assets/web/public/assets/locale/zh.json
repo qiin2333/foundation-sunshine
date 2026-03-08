@@ -754,6 +754,7 @@
     "login": "登录",
     "network_error": "网络错误，请检查连接",
     "password": "密码",
+    "password_match": "密码匹配",
     "password_mismatch": "密码不匹配",
     "server_error": "服务器错误",
     "show_password": "显示密码",
