@@ -65,24 +65,24 @@ namespace platf::capture_plugin {
     }
 
     // Get plugin info and validate ABI version
-    sunshine_capture_plugin_info_t info {};
-    if (plugin->vtable.get_info(&info) != 0) {
+    sunshine_capture_plugin_info_t plugin_info {};
+    if (plugin->vtable.get_info(&plugin_info) != 0) {
       BOOST_LOG(error) << "Plugin sunshine_capture_get_info() failed";
       FreeLibrary(dll);
       return nullptr;
     }
 
-    if (info.abi_version != SUNSHINE_CAPTURE_PLUGIN_ABI_VERSION) {
+    if (plugin_info.abi_version != SUNSHINE_CAPTURE_PLUGIN_ABI_VERSION) {
       BOOST_LOG(error) << "Plugin ABI version mismatch: expected "
                        << SUNSHINE_CAPTURE_PLUGIN_ABI_VERSION
-                       << ", got " << info.abi_version;
+                       << ", got " << plugin_info.abi_version;
       FreeLibrary(dll);
       return nullptr;
     }
 
-    plugin->name = info.name ? info.name : "unknown";
-    plugin->version = info.version ? info.version : "0.0.0";
-    plugin->supported_mem_types = info.supported_mem_types;
+    plugin->name = plugin_info.name ? plugin_info.name : "unknown";
+    plugin->version = plugin_info.version ? plugin_info.version : "0.0.0";
+    plugin->supported_mem_types = plugin_info.supported_mem_types;
 
     // Resolve remaining functions
     plugin->vtable.enum_displays = resolve_fn<sunshine_capture_enum_displays_fn>(dll, "sunshine_capture_enum_displays");
