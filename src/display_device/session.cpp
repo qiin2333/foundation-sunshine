@@ -634,6 +634,12 @@ namespace display_device {
     // 注意：即使是无操作模式，VDD 在非常驻模式下也会被销毁（上面已处理）
     if (is_no_operation) {
       BOOST_LOG(info) << "无操作模式，跳过拓扑恢复";
+      // 清理持久化数据中可能残留的旧 VDD 显示模式/HDR状态，
+      // 避免下一次 Launch 创建新 VDD 时，apply_config 使用旧 VDD 的 GUID
+      if (settings.has_persistent_data()) {
+        BOOST_LOG(info) << "清理残留的显示设备持久化数据（VDD 已销毁/重建后 GUID 会变化）";
+        settings.reset_persistence();
+      }
       stop_timer_and_clear_vdd_state();
       return;
     }
