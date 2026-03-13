@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <atomic>
 #include <stdexcept>
+#include <random>
 #include <map>
 #include <set>
 #include <sstream>
