@@ -167,8 +167,6 @@ namespace display_device {
     current_device_prep.reset();
     current_vdd_prep.reset();
     current_use_vdd.reset();
-    deferred_restore_ = false;
-    deferred_client_id_.clear();
     // 恢复原始的 output_name，避免下一个会话使用已销毁的 VDD 设备 ID
     if (!original_output_name.empty()) {
       config::video.output_name = original_output_name;
@@ -288,9 +286,7 @@ namespace display_device {
     std::lock_guard lock { mutex };
 
     // Clean up VDD state if this is a new session with a different client
-    // 注意：如果处于 deferred restore 状态，不在这里清理，
-    // 让后面的 vdd_already_exists 分支处理（需要区分同客户端复用 vs 不同客户端恢复）
-    if (!is_reconfigure && !deferred_restore_) {
+    if (!is_reconfigure) {
       if (const std::string new_client_id = get_client_id_from_session(session);
         !current_vdd_client_id.empty() && !new_client_id.empty() &&
         current_vdd_client_id != new_client_id) {
@@ -329,18 +325,6 @@ namespace display_device {
     const bool is_rdp_blocking_vdd = !is_running_as_system_user && display_device::w_utils::is_any_rdp_session_active();
     const bool will_use_vdd = needs_vdd && !is_rdp_blocking_vdd;
 
-    // 如果处于 deferred restore 状态，新会话不使用 VDD 或 VDD 已不存在时，
-    // 需要先执行完整恢复再继续配置。
-    if (deferred_restore_ && (!will_use_vdd || !vdd_already_exists)) {
-      BOOST_LOG(info) << "VDD 延迟恢复：新会话不复用 VDD，执行完整恢复";
-      deferred_restore_ = false;
-      deferred_client_id_.clear();
-      timer->setup_timer(nullptr);
-      if (vdd_already_exists) {
-        execute_deferred_restore(deferred_restore_reason_);
-      }
-    }
-    
     if (will_use_vdd && !vdd_already_exists) {
 
       // 如果有待恢复的设置，保留旧的初始拓扑，不要覆盖
@@ -358,31 +342,7 @@ namespace display_device {
       }
     }
     else if (will_use_vdd && vdd_already_exists) {
-      // VDD 已存在。检查是否有 deferred restore（grace period 内的复用机会）。
-      const std::string new_client_id = get_client_id_from_session(session);
-
-      if (deferred_restore_) {
-        if (!new_client_id.empty() && new_client_id == deferred_client_id_) {
-          // 同一客户端切换应用：取消 grace period，复用 VDD（GUID 不变、persistent_data 有效）
-          BOOST_LOG(info) << "VDD 延迟恢复取消：同一客户端（" << new_client_id << "）复用现有 VDD";
-          deferred_restore_ = false;
-          deferred_client_id_.clear();
-          timer->setup_timer(nullptr);
-          // 不设置 pre_saved_initial_topology，让 apply_config 复用 persistent_data
-        }
-        else {
-          // 不同客户端：先执行完整恢复，再重新配置
-          BOOST_LOG(info) << "VDD 延迟恢复：不同客户端（" << deferred_client_id_ << " -> " << new_client_id << "），执行完整恢复";
-          deferred_restore_ = false;
-          deferred_client_id_.clear();
-          timer->setup_timer(nullptr);
-          execute_deferred_restore(deferred_restore_reason_);
-          // 恢复后 VDD 已销毁，需要重新创建，保存当前拓扑作为初始拓扑
-          pre_saved_initial_topology = get_current_topology();
-          BOOST_LOG(debug) << "Pre-saved initial topology after full restore: " << to_string(*pre_saved_initial_topology);
-        }
-      }
-      else if (pending_restore_ && settings.has_persistent_data()) {
+      if (pending_restore_ && settings.has_persistent_data()) {
         // 有待恢复的设置且 VDD 仍存在（CCD 曾失败），保留原有初始拓扑
         BOOST_LOG(info) << "有待恢复的设置且 VDD 仍存在，保留原有初始拓扑";
         pending_restore_ = false;
@@ -695,53 +655,8 @@ namespace display_device {
     // 检查 apply_config 是否曾成功执行（persistent_data 是否存在）
     const bool has_persistent = settings.has_persistent_data();
 
-    // VDD 延迟销毁 Grace Period：
-    // 如果 VDD 存在 + 非常驻模式 + VDD 模式 + 有 persistent_data，
-    // 延迟整个 restore 操作，给下一个 Launch（同客户端切换应用）机会复用 VDD。
-    // 这避免了不必要的 VDD 销毁重建，消除 GUID 变化和拓扑闪烁。
-    if (!vdd_id.empty() && !is_keep_enabled && is_vdd_mode && has_persistent) {
-      BOOST_LOG(info) << "VDD 延迟恢复：启动 grace period，等待可能的同客户端新串流复用 VDD";
-      deferred_restore_ = true;
-      deferred_restore_reason_ = reason;
-      deferred_client_id_ = current_vdd_client_id;
-
-      timer->setup_timer([this]() {
-        // Grace period 到期，没有新的 configure_display 到来，执行真正的 restore
-        BOOST_LOG(info) << "VDD grace period 到期，执行延迟恢复";
-        deferred_restore_ = false;
-        deferred_client_id_.clear();
-        execute_deferred_restore(deferred_restore_reason_);
-        return true;  // 一次性执行，不重试
-      });
-      return;
-    }
-
-    // 非延迟场景，立即执行完整 restore
-    execute_deferred_restore(reason);
-  }
-
-  void
-  session_t::execute_deferred_restore(revert_reason_e reason) {
-    const auto vdd_id = display_device::find_device_by_friendlyname(ZAKO_NAME);
-    const bool is_vdd_mode = current_use_vdd.value_or(false);
-    const bool is_keep_enabled = config::video.vdd_keep_enabled;
-
-    const auto display_prep = current_device_prep.value_or(
-      static_cast<parsed_config_t::device_prep_e>(config::video.display_device_prep)
-    );
-    const auto vdd_prep = current_vdd_prep.value_or(
-      parsed_config_t::to_vdd_prep(display_prep)
-    );
-    const auto device_prep = is_vdd_mode
-      ? display_prep
-      : parsed_config_t::to_physical_device_prep(display_prep);
-
-    const bool is_no_operation = is_vdd_mode
-      ? (vdd_prep == parsed_config_t::vdd_prep_e::no_operation)
-      : (device_prep == parsed_config_t::device_prep_e::no_operation);
-
-    const bool has_persistent = settings.has_persistent_data();
-
+    // 立即执行完整 restore
+    // VDD 销毁逻辑
     if (!vdd_id.empty()) {
       bool should_destroy = false;
       
@@ -767,7 +682,6 @@ namespace display_device {
     }
 
     // 如果 apply_config 从未执行成功，拓扑从未被修改过，不需要恢复
-    // 直接取消可能还在等待的定时器，清理状态并返回
     if (!has_persistent) {
       BOOST_LOG(info) << "apply_config 从未执行成功，跳过拓扑恢复";
       stop_timer_and_clear_vdd_state();
@@ -775,7 +689,6 @@ namespace display_device {
     }
 
     // 无头主机自动创建检查（在 VDD 清理之后、拓扑恢复之前执行）
-    // 此检查独立于操作模式（no_operation / 普通模式），确保无头主机始终能获得显示器
     if (reason == revert_reason_e::stream_ended && config::video.vdd_headless_create_enabled) {
       auto devices = display_device::enum_available_devices();
       if (devices.empty()) {
@@ -790,7 +703,6 @@ namespace display_device {
     }
 
     // 无操作模式：跳过拓扑恢复（因为拓扑从未被修改过）
-    // 注意：即使是无操作模式，VDD 在非常驻模式下也会被销毁（上面已处理）
     if (is_no_operation) {
       BOOST_LOG(info) << "无操作模式，跳过拓扑恢复";
       stop_timer_and_clear_vdd_state();
@@ -827,19 +739,17 @@ namespace display_device {
         
         // 在锁外执行CCD检查和恢复操作（避免阻塞托盘等其他操作）
         if (settings.is_changing_settings_going_to_fail()) {
-          // 解锁后CCD仍不可用，启动轮询作为fallback
           BOOST_LOG(warning) << "CCD API仍不可用，启动轮询机制";
           std::lock_guard lock { mutex };
           this->start_polling_restore(reason);
-          return;  // 轮询会处理清理
+          return;
         }
         
-        // 执行恢复（这可能需要几秒钟，不要持锁）
-        // VDD生命周期已由restore_state_impl决定，跳过revert_settings中的VDD销毁
+        // 执行恢复
         auto result = settings.revert_settings(reason, true);
         BOOST_LOG(info) << "恢复显示设置" << (result ? "成功" : "失败");
         
-        // 恢复完成后清除标志和状态（在锁内执行，确保线程安全）
+        // 恢复完成后清除标志和状态
         {
           std::lock_guard lock { mutex };
           pending_restore_ = false;
