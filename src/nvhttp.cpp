@@ -783,12 +783,11 @@ namespace nvhttp {
         }
         else {
           // Check for preset PIN (from QR code pairing)
-          auto preset = get_preset_pin();
+          auto preset = consume_preset_pin();
           if (!preset.empty()) {
             BOOST_LOG(info) << "Using preset PIN for QR code pairing with " << last_pair_name;
             ptr->second.client.name = last_pair_name;
             getservercert(ptr->second, tree, preset, last_pair_name);
-            clear_preset_pin();
           }
           else {
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
@@ -1015,22 +1014,20 @@ namespace nvhttp {
   }
 
   std::string
-  get_preset_pin() {
+  consume_preset_pin() {
     std::lock_guard lock { preset_pin_state.mutex };
-    if (preset_pin_state.pin.empty()) return {};
+    if (preset_pin_state.pin.empty()) {
+      return std::string {};
+    }
     if (std::chrono::steady_clock::now() > preset_pin_state.expires_at) {
       preset_pin_state.pin.clear();
       preset_pin_state.name.clear();
-      return {};
+      return std::string {};
     }
-    return preset_pin_state.pin;
-  }
-
-  void
-  clear_preset_pin() {
-    std::lock_guard lock { preset_pin_state.mutex };
+    std::string pin = std::move(preset_pin_state.pin);
     preset_pin_state.pin.clear();
     preset_pin_state.name.clear();
+    return pin;
   }
 
   // Use keep-alive connection

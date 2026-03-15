@@ -222,17 +222,11 @@ namespace nvhttp {
   set_preset_pin(const std::string &pin, const std::string &name, int timeout_seconds = 120);
 
   /**
-   * @brief Get the current preset PIN if it's still valid.
+   * @brief Atomically get and clear the preset PIN if it's still valid.
    * @return The preset PIN string, or empty string if expired/not set.
    */
   std::string
-  get_preset_pin();
-
-  /**
-   * @brief Clear any preset PIN.
-   */
-  void
-  clear_preset_pin();
+  consume_preset_pin();
 
   /**
    * @brief Remove all paired clients.

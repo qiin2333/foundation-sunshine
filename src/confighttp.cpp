@@ -13,7 +13,6 @@
 #include <iomanip>
 #include <atomic>
 #include <stdexcept>
-#include <random>
 #include <map>
 #include <set>
 #include <sstream>
@@ -1261,12 +1260,13 @@ namespace confighttp {
       response->write(data.str());
     });
 
-    // Generate a random 4-digit PIN
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, 9999);
-    std::string pin = std::to_string(dist(gen));
-    while (pin.size() < 4) pin = "0" + pin;
+    // Generate a random 4-digit PIN using OpenSSL CSPRNG
+    uint16_t random_val;
+    RAND_bytes(reinterpret_cast<unsigned char *>(&random_val), sizeof(random_val));
+    int pin_num = random_val % 10000;
+    char pin_buf[5];
+    std::snprintf(pin_buf, sizeof(pin_buf), "%04d", pin_num);
+    std::string pin(pin_buf);
 
     // Set the preset PIN in nvhttp (valid for 120 seconds)
     std::string server_name = config::nvhttp.sunshine_name;
