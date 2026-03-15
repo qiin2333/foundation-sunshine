@@ -239,8 +239,10 @@
           </div>
         </div>
 
-        <!-- 操作按钮 -->
-        <div class="action-buttons">
+      </div>
+
+      <!-- 操作按钮（固定底栏） -->
+      <div class="action-buttons">
           <button class="btn btn-setup btn-setup-secondary" 
                   @click="previousStep" 
                   v-if="currentStep > 1 && currentStep < 5"
@@ -272,7 +274,6 @@
             {{ $t('setup.go_to_apps') }}
             <i class="fas fa-arrow-right"></i>
           </button>
-        </div>
       </div>
     </div>
     <!-- Skip Wizard Modal -->
@@ -616,12 +617,13 @@ export default {
 
 <style scoped>
 .setup-container {
-  max-width: 900px;
-  margin: 1em auto;
-  padding: 0 1em;
-  height: calc(100vh - 2em);
+  position: fixed;
+  inset: 0;
+  padding: 1em;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  z-index: 1000;
 }
 
 .setup-card {
@@ -631,7 +633,10 @@ export default {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  width: 100%;
+  max-width: 900px;
+  flex: 1;
+  min-height: 0;
 }
 
 .setup-header {
@@ -660,6 +665,7 @@ export default {
   flex-direction: column;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .step-indicator {
@@ -825,11 +831,11 @@ export default {
 .action-buttons {
   display: flex;
   justify-content: space-between;
-  margin-top: 1em;
   gap: 0.8em;
   flex-shrink: 0;
-  padding-top: 1em;
+  padding: 1em 1.5em;
   border-top: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
 }
 
 .btn-setup {
