@@ -19,9 +19,19 @@ const isWGCSelected = computed(() => {
   return props.platform === 'windows' && config.value.capture === 'wgc'
 })
 
+// 检查是否选择了 NvFBC
+const isNvFBCSelected = computed(() => {
+  return props.platform === 'windows' && config.value.capture === 'nvfbc'
+})
+
 // Sunshine 运行模式状态
 const isUserMode = ref(false)
 const isCheckingMode = ref(false)
+
+// NvFBC 状态
+const nvfbcStatus = ref(null)
+const isCheckingNvfbc = ref(false)
+const isInstallingNvfbc = ref(false)
 
 const showMessage = (message, type = 'info') => {
   // 尝试使用 window.showToast（如果可用）
@@ -95,15 +105,59 @@ const toggleSunshineMode = async () => {
   }
 }
 
+// 检查 NvFBC 环境状态
+const checkNvfbcStatus = async () => {
+  if (!isTauri.value) return
+  isCheckingNvfbc.value = true
+  try {
+    nvfbcStatus.value = await window.__TAURI__.core.invoke('check_nvfbc_status')
+  } catch (error) {
+    console.error('检查 NvFBC 状态失败:', error)
+    nvfbcStatus.value = null
+  } finally {
+    isCheckingNvfbc.value = false
+  }
+}
+
+// 一键安装 NvFBC
+const installNvfbc = async () => {
+  if (!isTauri.value) {
+    showMessage(t('config.nvfbc_control_panel_only'), 'error')
+    return
+  }
+  isInstallingNvfbc.value = true
+  try {
+    const msg = await window.__TAURI__.core.invoke('setup_nvfbc')
+    showMessage(msg || t('config.nvfbc_install_success'), 'success')
+    // 延迟后重新检查（等待注册表和 UAC 完成）
+    setTimeout(() => checkNvfbcStatus(), 3000)
+    setTimeout(() => checkNvfbcStatus(), 8000)
+  } catch (error) {
+    console.error('安装 NvFBC 失败:', error)
+    showMessage(t('config.nvfbc_install_failed') + ': ' + (error.message || error), 'error')
+  } finally {
+    isInstallingNvfbc.value = false
+  }
+}
+
 onMounted(() => {
   if (isTauri.value && isWGCSelected.value) {
     checkSunshineMode()
+  }
+  if (isTauri.value && isNvFBCSelected.value) {
+    checkNvfbcStatus()
   }
 })
 
 watch(isWGCSelected, (newValue) => {
   if (newValue && isTauri.value) {
     checkSunshineMode()
+  }
+})
+
+watch(isNvFBCSelected, (newValue) => {
+  if (newValue && isTauri.value) {
+    checkNvfbcStatus()
   }
 })
 </script>
@@ -165,6 +219,7 @@ watch(isWGCSelected, (newValue) => {
               <option value="ddx">Desktop Duplication API</option>
               <option value="wgc">Windows.Graphics.Capture {{ $t('_common.beta') }}</option>
               <option value="amd">AMD Display Capture {{ $t('_common.beta') }}</option>
+              <option value="nvfbc">NvFBC (Plugin) {{ $t('_common.beta') }}</option>
             </template>
           </PlatformLayout>
         </select>
@@ -191,6 +246,44 @@ watch(isWGCSelected, (newValue) => {
                 : $t('config.wgc_switch_to_user_mode')
           }}
         </button>
+        <button
+          v-if="isNvFBCSelected && isTauri"
+          type="button"
+          :class="[
+            'btn',
+            nvfbcStatus && nvfbcStatus.wrapper_installed && nvfbcStatus.registry_enabled && nvfbcStatus.plugin_installed
+              ? 'btn-success'
+              : 'btn-primary',
+          ]"
+          style="white-space: nowrap"
+          @click="installNvfbc"
+          :disabled="isInstallingNvfbc || isCheckingNvfbc"
+          :title="$t('config.nvfbc_install_tooltip')"
+        >
+          <i v-if="isInstallingNvfbc" class="fas fa-spinner fa-spin me-1"></i>
+          <i
+            v-else-if="
+              nvfbcStatus &&
+              nvfbcStatus.wrapper_installed &&
+              nvfbcStatus.registry_enabled &&
+              nvfbcStatus.plugin_installed
+            "
+            class="fas fa-check me-1"
+          ></i>
+          <i v-else class="fas fa-download me-1"></i>
+          {{
+            isInstallingNvfbc
+              ? $t('config.nvfbc_installing')
+              : isCheckingNvfbc
+                ? $t('config.nvfbc_checking')
+                : nvfbcStatus &&
+                    nvfbcStatus.wrapper_installed &&
+                    nvfbcStatus.registry_enabled &&
+                    nvfbcStatus.plugin_installed
+                  ? $t('config.nvfbc_installed')
+                  : $t('config.nvfbc_install')
+          }}
+        </button>
       </div>
       <div class="form-text">
         {{ $t('config.capture_desc') }}
@@ -199,6 +292,66 @@ watch(isWGCSelected, (newValue) => {
           <span v-if="isCheckingMode">{{ $t('config.wgc_checking_running_mode') }}</span>
           <span v-else-if="isUserMode">{{ $t('config.wgc_user_mode_available') }}</span>
           <span v-else>{{ $t('config.wgc_service_mode_warning') }}</span>
+        </span>
+        <span v-if="isNvFBCSelected && isTauri" class="d-block mt-1">
+          <template v-if="isCheckingNvfbc">
+            <span class="text-muted">
+              <i class="fas fa-spinner fa-spin me-1"></i>
+              {{ $t('config.nvfbc_checking_status') }}
+            </span>
+          </template>
+          <template v-else-if="nvfbcStatus">
+            <span :class="nvfbcStatus.has_nvidia_gpu ? 'text-success' : 'text-danger'" class="d-block">
+              <i
+                :class="nvfbcStatus.has_nvidia_gpu ? 'fas fa-check-circle' : 'fas fa-times-circle'"
+                class="me-1"
+              ></i>
+              {{
+                nvfbcStatus.has_nvidia_gpu
+                  ? $t('config.nvfbc_gpu_found')
+                  : $t('config.nvfbc_gpu_not_found')
+              }}
+            </span>
+            <span :class="nvfbcStatus.registry_enabled ? 'text-success' : 'text-warning'" class="d-block">
+              <i
+                :class="
+                  nvfbcStatus.registry_enabled ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'
+                "
+                class="me-1"
+              ></i>
+              {{
+                nvfbcStatus.registry_enabled
+                  ? $t('config.nvfbc_registry_enabled')
+                  : $t('config.nvfbc_registry_disabled')
+              }}
+            </span>
+            <span :class="nvfbcStatus.wrapper_installed ? 'text-success' : 'text-warning'" class="d-block">
+              <i
+                :class="
+                  nvfbcStatus.wrapper_installed ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'
+                "
+                class="me-1"
+              ></i>
+              {{
+                nvfbcStatus.wrapper_installed
+                  ? $t('config.nvfbc_wrapper_installed')
+                  : $t('config.nvfbc_wrapper_missing')
+              }}
+            </span>
+            <span :class="nvfbcStatus.plugin_installed ? 'text-success' : 'text-warning'" class="d-block">
+              <i
+                :class="
+                  nvfbcStatus.plugin_installed ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle'
+                "
+                class="me-1"
+              ></i>
+              {{
+                nvfbcStatus.plugin_installed
+                  ? $t('config.nvfbc_plugin_installed')
+                  : $t('config.nvfbc_plugin_missing')
+              }}
+            </span>
+          </template>
         </span>
       </div>
     </div>
