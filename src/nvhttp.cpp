@@ -6,6 +6,7 @@
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 
 // standard includes
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -84,6 +85,58 @@ namespace nvhttp {
   std::atomic<uint32_t> session_id_counter;
 
   static std::string last_pair_name;
+
+  // Preset PIN for QR code pairing
+  static struct {
+    std::string pin;
+    std::string name;
+    std::chrono::steady_clock::time_point expires_at;
+    bool paired = false;
+    std::mutex mutex;
+  } preset_pin_state;
+
+  // Rate limiting for pairing attempts per IP
+  struct pair_rate_limiter_t {
+    std::unordered_map<std::string, std::pair<int, std::chrono::steady_clock::time_point>> attempts;
+    std::mutex mutex;
+
+    bool
+    check_and_record(const std::string &ip) {
+      constexpr int max_attempts = 5;
+      constexpr int window_seconds = 60;
+      std::lock_guard lock { mutex };
+      auto now = std::chrono::steady_clock::now();
+      auto &entry = attempts[ip];
+
+      // Reset window if expired
+      if (now - entry.second > std::chrono::seconds(window_seconds)) {
+        entry = { 0, now };
+      }
+
+      if (entry.first >= max_attempts) {
+        return false;  // rate limited
+      }
+
+      entry.first++;
+      return true;
+    }
+
+    void
+    cleanup() {
+      constexpr int window_seconds = 60;
+      std::lock_guard lock { mutex };
+      auto now = std::chrono::steady_clock::now();
+      for (auto it = attempts.begin(); it != attempts.end();) {
+        if (now - it->second.second > std::chrono::seconds(window_seconds * 2)) {
+          it = attempts.erase(it);
+        }
+        else {
+          ++it;
+        }
+      }
+    }
+  };
+  static pair_rate_limiter_t pair_rate_limit;
 
   // Map to store certificate UUIDs keyed by request pointer
   // Using weak_ptr to track request lifetime and prevent memory leaks
@@ -400,7 +453,6 @@ namespace nvhttp {
     launch_session->enable_hdr = util::from_view(get_arg(args, "hdrMode", "0"));
     launch_session->use_vdd = util::from_view(get_arg(args, "useVdd", "0"));
     launch_session->custom_screen_mode = util::from_view(get_arg(args, "customScreenMode", "-1"));
-    launch_session->custom_vdd_screen_mode = util::from_view(get_arg(args, "customVddScreenMode", "-1"));
     launch_session->max_nits = std::stof(get_arg(args, "maxBrightness", "1000"));
     launch_session->min_nits = std::stof(get_arg(args, "minBrightness", "0.001"));
     launch_session->max_full_nits = std::stof(get_arg(args, "maxAverageBrightness", "1000"));
@@ -449,7 +501,6 @@ namespace nvhttp {
     launch_session->env["SUNSHINE_CLIENT_ENABLE_MIC"] = launch_session->enable_mic ? "true" : "false";
     launch_session->env["SUNSHINE_CLIENT_USE_VDD"] = launch_session->use_vdd ? "true" : "false";
     launch_session->env["SUNSHINE_CLIENT_CUSTOM_SCREEN_MODE"] = std::to_string(launch_session->custom_screen_mode);
-    launch_session->env["SUNSHINE_CLIENT_CUSTOM_VDD_SCREEN_MODE"] = std::to_string(launch_session->custom_vdd_screen_mode);
     int channelCount = launch_session->surround_info & (65535);
     switch (channelCount) {
       case 2:
@@ -734,6 +785,24 @@ namespace nvhttp {
   pair(std::shared_ptr<safe::queue_t<crypto::x509_t>> &add_cert, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     print_req<T>(request);
 
+    // Rate limit pairing attempts per IP
+    auto client_ip = request->remote_endpoint().address().to_string();
+    if (!pair_rate_limit.check_and_record(client_ip)) {
+      BOOST_LOG(warning) << "Pairing rate limited for IP: " << client_ip;
+      pt::ptree rate_tree;
+      rate_tree.put("root.<xmlattr>.status_code", 429);
+      rate_tree.put("root.<xmlattr>.status_message", "Too many pairing attempts. Try again later.");
+      rate_tree.put("root.paired", 0);
+      std::ostringstream data;
+      pt::write_xml(data, rate_tree);
+      response->write(data.str());
+      response->close_connection_after_response = true;
+      return;
+    }
+
+    // Periodically clean up stale rate limit entries
+    pair_rate_limit.cleanup();
+
     pt::ptree tree;
 
     auto fg = util::fail_guard([&]() {
@@ -776,13 +845,26 @@ namespace nvhttp {
           getservercert(ptr->second, tree, pin, last_pair_name);
         }
         else {
+          // Check for preset PIN (from QR code pairing)
+          // Only allow preset PIN for LAN/localhost clients
+          auto remote_addr = request->remote_endpoint().address();
+          auto nettype = net::from_address(remote_addr.to_string());
+          auto preset = (nettype == net::net_e::PC || nettype == net::net_e::LAN) ? consume_preset_pin() : std::string {};
+          if (!preset.empty()) {
+            BOOST_LOG(info) << "Using preset PIN for QR code pairing with " << last_pair_name
+                            << " from " << remote_addr.to_string();
+            ptr->second.client.name = last_pair_name;
+            getservercert(ptr->second, tree, preset, last_pair_name);
+          }
+          else {
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
-          system_tray::update_tray_require_pin(last_pair_name);
+            system_tray::update_tray_require_pin(last_pair_name);
 #endif
-          ptr->second.async_insert_pin.response = std::move(response);
+            ptr->second.async_insert_pin.response = std::move(response);
 
-          fg.disable();
-          return;
+            fg.disable();
+            return;
+          }
         }
       }
       else if (it->second == "pairchallenge"sv) {
@@ -981,6 +1063,60 @@ namespace nvhttp {
   std::string
   get_pair_name() {
     return last_pair_name;
+  }
+
+  bool
+  set_preset_pin(const std::string &pin, const std::string &name, int timeout_seconds) {
+    if (pin.size() != 4 || !std::all_of(pin.begin(), pin.end(), ::isdigit)) {
+      BOOST_LOG(warning) << "Invalid preset PIN: must be 4 digits";
+      return false;
+    }
+
+    std::lock_guard lock { preset_pin_state.mutex };
+    preset_pin_state.pin = pin;
+    preset_pin_state.name = name;
+    preset_pin_state.expires_at = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+    preset_pin_state.paired = false;
+    BOOST_LOG(info) << "Preset PIN set for QR pairing, expires in " << timeout_seconds << "s";
+    return true;
+  }
+
+  std::string
+  consume_preset_pin() {
+    std::lock_guard lock { preset_pin_state.mutex };
+    if (preset_pin_state.pin.empty()) {
+      return std::string {};
+    }
+    if (std::chrono::steady_clock::now() > preset_pin_state.expires_at) {
+      preset_pin_state.pin.clear();
+      preset_pin_state.name.clear();
+      return std::string {};
+    }
+    std::string pin = std::move(preset_pin_state.pin);
+    preset_pin_state.pin.clear();
+    preset_pin_state.name.clear();
+    return pin;
+  }
+
+  void
+  clear_preset_pin() {
+    std::lock_guard lock { preset_pin_state.mutex };
+    preset_pin_state.pin.clear();
+    preset_pin_state.name.clear();
+    preset_pin_state.paired = true;
+  }
+
+  std::string
+  get_qr_pair_status() {
+    std::lock_guard lock { preset_pin_state.mutex };
+    if (preset_pin_state.paired) return "paired";
+    if (preset_pin_state.pin.empty()) return "inactive";
+    if (std::chrono::steady_clock::now() > preset_pin_state.expires_at) {
+      preset_pin_state.pin.clear();
+      preset_pin_state.name.clear();
+      return "expired";
+    }
+    return "active";
   }
 
   // Use keep-alive connection
@@ -2050,5 +2186,18 @@ namespace nvhttp {
     save_state();
     load_state();
     return removed;
+  }
+
+  bool
+  rename_client(const std::string &uuid, const std::string &new_name) {
+    client_t &client = client_root;
+    for (auto &named_cert : client.named_devices) {
+      if (named_cert.uuid == uuid) {
+        named_cert.name = new_name;
+        save_state();
+        return true;
+      }
+    }
+    return false;
   }
 }  // namespace nvhttp
