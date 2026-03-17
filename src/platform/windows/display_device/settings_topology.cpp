@@ -1,3 +1,6 @@
+// standard includes
+#include <algorithm>
+
 // local includes
 #include "settings_topology.h"
 #include "src/display_device/to_string.h"
@@ -460,14 +463,12 @@ namespace display_device {
     // 这样 handle_display_mode_configuration 和 handle_hdr_state_configuration
     // 只会查询/设置VDD相关设备的模式，不会因为物理显示器状态不稳定而失败
     active_topology_t vdd_only_topology;
-    for (const auto &group : current_topology) {
-      for (const auto &id : group) {
-        if (id == requested_device_id) {
-          vdd_only_topology.push_back(group);
-          break;
-        }
-      }
-    }
+    std::copy_if(current_topology.begin(), current_topology.end(),
+      std::back_inserter(vdd_only_topology),
+      [&requested_device_id](const auto &group) {
+        return std::any_of(group.begin(), group.end(),
+          [&requested_device_id](const auto &id) { return id == requested_device_id; });
+      });
 
     return handled_topology_result_t {
       topology_pair_t {

@@ -344,10 +344,11 @@ namespace display_device {
         // 检查新的 vdd_prep 是否与当前的相同
         // 如果模式变了（如 ensure_only_display → no_operation），persistent_data 中的拓扑记忆可能不匹配，
         // 此时需要先执行 deferred restore 恢复到干净状态，再重新配置。
-        auto new_vdd_prep = static_cast<parsed_config_t::vdd_prep_e>(config.vdd_prep);
-        if (session.custom_vdd_screen_mode != -1) {
-          new_vdd_prep = static_cast<parsed_config_t::vdd_prep_e>(session.custom_vdd_screen_mode);
+        auto new_device_prep = static_cast<parsed_config_t::device_prep_e>(config.display_device_prep);
+        if (session.custom_screen_mode != -1) {
+          new_device_prep = static_cast<parsed_config_t::device_prep_e>(session.custom_screen_mode);
         }
+        const auto new_vdd_prep = parsed_config_t::to_vdd_prep(new_device_prep);
         const auto old_vdd_prep = current_vdd_prep.value_or(new_vdd_prep);
 
         if (new_vdd_prep == old_vdd_prep) {
@@ -676,18 +677,15 @@ namespace display_device {
       return;
     }
 
-    const auto vdd_prep = current_vdd_prep.value_or(
-      static_cast<parsed_config_t::vdd_prep_e>(config::video.vdd_prep)
-    );
-    const auto device_prep = current_device_prep.value_or(
+    const auto display_prep = current_device_prep.value_or(
       static_cast<parsed_config_t::device_prep_e>(config::video.display_device_prep)
     );
     const auto vdd_prep = current_vdd_prep.value_or(
-      static_cast<parsed_config_t::vdd_prep_e>(config::video.vdd_prep)
+      parsed_config_t::to_vdd_prep(display_prep)
     );
-    const auto device_prep = current_device_prep.value_or(
-      static_cast<parsed_config_t::device_prep_e>(config::video.display_device_prep)
-    );
+    const auto device_prep = is_vdd_mode
+      ? display_prep
+      : parsed_config_t::to_physical_device_prep(display_prep);
 
     // 判断是否是无操作模式（会话配置了 no_operation，意味着拓扑从未被修改过）
     // VDD模式看 vdd_prep，普通模式看 device_prep
