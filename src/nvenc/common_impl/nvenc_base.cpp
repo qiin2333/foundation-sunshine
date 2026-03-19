@@ -864,8 +864,14 @@ namespace nvenc {
           pic_params.codecPicParams.hevcPicParams.seiPayloadArray = sei_payloads;
         }
         else if (video_format == 2) {
+#if NVENC_INT_VERSION >= 1200
           pic_params.codecPicParams.av1PicParams.obuPayloadArrayCnt = sei_count;
           pic_params.codecPicParams.av1PicParams.obuPayloadArray = sei_payloads;
+#else
+          // NVENC SDK 12.0-之前的接口头文件不包含 av1PicParams。
+          // 对于这类版本的 NVENC 编码器，AV1 的动态 OBU/SEI 注入不可用，
+          // 这里直接跳过，避免编译失败。
+#endif
         }
       }
     }
