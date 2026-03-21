@@ -40,12 +40,12 @@ rem ============================================================================
 echo Stopping Sunshine service...
 set "SERVICE_WAS_RUNNING=0"
 net stop SunshineService >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
+if not errorlevel 1 (
     set "SERVICE_WAS_RUNNING=1"
     echo Sunshine service stopped.
     timeout /t 2 /nobreak 1>nul
 ) else (
-    echo Sunshine service not running (OK).
+    echo Sunshine service not running, OK.
 )
 
 rem ============================================================================
@@ -57,7 +57,7 @@ echo Cleaning up existing Virtual Mouse driver...
 rem Remove ALL existing device nodes (loop until none remain)
 :remove_loop
 "%NEFCON%" --remove-device-node --hardware-id Root\ZakoVirtualMouse --class-guid 745a17a0-74d3-11d0-b6fe-00a0c90f57da
-if %ERRORLEVEL% EQU 0 (
+if not errorlevel 1 (
     echo Removed a device node, checking for more...
     goto remove_loop
 )
@@ -67,10 +67,10 @@ timeout /t 2 /nobreak 1>nul
 
 rem Uninstall previous driver
 "%NEFCON%" --uninstall-driver --inf-path "%DIST_DIR%\ZakoVirtualMouse.inf"
-if %ERRORLEVEL% EQU 0 (
+if not errorlevel 1 (
     echo Successfully uninstalled previous driver
 ) else (
-    echo No previous driver found (OK)
+    echo No previous driver found, OK.
 )
 
 timeout /t 3 /nobreak 1>nul
@@ -92,20 +92,20 @@ echo Installing Virtual Mouse driver...
 "%NEFCON%" --create-device-node --hardware-id Root\ZakoVirtualMouse --class-name HIDClass --class-guid 745a17a0-74d3-11d0-b6fe-00a0c90f57da
 "%NEFCON%" --install-driver --inf-path "%DIST_DIR%\ZakoVirtualMouse.inf"
 
-if %ERRORLEVEL% EQU 0 (
+if not errorlevel 1 (
     echo Virtual Mouse driver installation completed successfully!
 ) else (
-    echo Virtual Mouse driver installation failed with error %ERRORLEVEL%
+    echo Virtual Mouse driver installation failed with error !ERRORLEVEL!
 )
 
 rem ============================================================================
 rem  Restart Sunshine service if it was running before
 rem ============================================================================
 
-if "%SERVICE_WAS_RUNNING%"=="1" (
+if "!SERVICE_WAS_RUNNING!"=="1" (
     echo Restarting Sunshine service...
     net start SunshineService >nul 2>&1
-    if !ERRORLEVEL! EQU 0 (
+    if not errorlevel 1 (
         echo Sunshine service restarted.
     ) else (
         echo WARNING: Could not restart Sunshine service.
