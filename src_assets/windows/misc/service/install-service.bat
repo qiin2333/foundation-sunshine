@@ -65,3 +65,22 @@ sc description %SERVICE_NAME% "Sunshine is a self-hosted game stream host for Mo
 
 rem Start the new service
 net start %SERVICE_NAME%
+
+rem Wait for Sunshine API to be ready (port 47990)
+echo Waiting for Sunshine API to be ready...
+set /a WAIT_COUNT=0
+set /a WAIT_MAX=15
+:wait_loop
+if !WAIT_COUNT! GEQ !WAIT_MAX! (
+    echo Sunshine API did not become ready within %WAIT_MAX% seconds, continuing anyway...
+    goto :wait_done
+)
+powershell -NoProfile -Command "try { $c = [System.Net.Sockets.TcpClient]::new(); $c.Connect('127.0.0.1', 47990); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+if !ERRORLEVEL!==0 (
+    echo Sunshine API is ready.
+    goto :wait_done
+)
+set /a WAIT_COUNT+=1
+timeout /t 1 /nobreak >nul
+goto :wait_loop
+:wait_done

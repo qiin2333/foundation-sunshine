@@ -11,6 +11,7 @@
 #define MySourceDir "@INNO_STAGING_DIR@"
 #define MyIconFile "@CMAKE_SOURCE_DIR@\sunshine.ico"
 #define MyWelcomeBmp "@CMAKE_SOURCE_DIR@\welcome.bmp"
+#define MySmallBmp "@CMAKE_SOURCE_DIR@\wizard_small.bmp"
 #define MyLicenseFile "@CMAKE_SOURCE_DIR@\LICENSE"
 
 [Setup]
@@ -37,8 +38,11 @@ SolidCompression=yes
 ; UI 设置
 SetupIconFile={#MyIconFile}
 UninstallDisplayIcon={app}\{#MyAppExeName}
-WizardStyle=modern
+WizardStyle=modern hidebevels
 WizardImageFile={#MyWelcomeBmp}
+WizardSmallImageFile={#MySmallBmp}
+WizardImageAlphaFormat=defined
+WizardSizePercent=120
 ; 版本信息 (VersionInfoVersion requires X.X.X.X format, use AppVersion for display)
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Sunshine Foundation Game Streaming Server
@@ -222,9 +226,9 @@ Filename: "{app}\scripts\install-gamepad.bat"; StatusMsg: "{cm:StatusInstallGame
 Filename: "{app}\scripts\install-service.bat"; StatusMsg: "{cm:StatusInstallService}"; Flags: runhidden waituntilterminated
 Filename: "{app}\scripts\autostart-service.bat"; StatusMsg: "{cm:StatusAutostart}"; Flags: runhidden waituntilterminated; Components: autostart
 
-; Finish page actions - user selectable
-Filename: "https://docs.qq.com/aio/DSGdQc3htbFJjSFdO?p=DXpTjzl2kZwBjN7jlRMkRJ"; Description: "{cm:FinishOpenDocs}"; Flags: postinstall shellexec unchecked nowait skipifsilent
-Filename: "{app}\assets\gui\{#MyAppGUIExeName}"; Description: "{cm:FinishLaunchGUI}"; Flags: postinstall shellexec nowait skipifsilent
+; Finish page actions - user selectable (use runascurrentuser to avoid SpawnServer issues in RDP)
+Filename: "https://docs.qq.com/aio/DSGdQc3htbFJjSFdO?p=DXpTjzl2kZwBjN7jlRMkRJ"; Description: "{cm:FinishOpenDocs}"; Flags: postinstall shellexec runascurrentuser unchecked nowait skipifsilent
+Filename: "{app}\assets\gui\{#MyAppGUIExeName}"; Description: "{cm:FinishLaunchGUI}"; Flags: postinstall shellexec runascurrentuser nowait skipifsilent
 
 [UninstallRun]
 ; Stop running processes first
@@ -249,6 +253,142 @@ Type: files; Name: "{app}\*.old"
 // =============================================================================
 // Pascal Script for custom behavior
 // =============================================================================
+
+// =============================================================================
+// Deep UI Customization — Sunshine Branded Installer Theme
+// =============================================================================
+// Color palette (BGR format for Delphi):
+//   Brand Gold:     $0098E8  (RGB #E89800)  — primary accent
+//   Brand Orange:   $0060C0  (RGB #C06000)  — headings
+//   Dark Text:      $1A1A1A  (RGB #1A1A1A)  — body text
+//   Mid Text:       $444444  (RGB #444444)  — secondary text
+//   Light BG:       $FAF6F2  (RGB #F2F6FA)  — warm tint background
+//   Inner BG:       $F5F2EF  (RGB #EFF2F5)  — inner panel bg
+//   Header BG:      $A86420  (RGB #2064A8)  — header band color
+//   Accent Line:    $0088D8  (RGB #D88800)  — accent bar
+
+var
+  BrandPanel: TPanel;
+  BrandLogo: TBitmapImage;
+  BrandTitle: TNewStaticText;
+  BrandSubtitle: TNewStaticText;
+  AccentBar: TBevel;
+
+procedure InitializeWizard();
+var
+  WelcomeLeft: Integer;
+begin
+  // ── Main form tweaks ──
+  WizardForm.Color := $FAF6F2;
+
+  // ── Header panel (top bar on inner pages) — brand color ──
+  WizardForm.MainPanel.Color := $C07020;
+  WizardForm.PageNameLabel.Font.Color := $FFFFFF;
+  WizardForm.PageNameLabel.Font.Size := 11;
+  WizardForm.PageNameLabel.Font.Style := [fsBold];
+  WizardForm.PageDescriptionLabel.Font.Color := $F0E0D0;
+  WizardForm.PageDescriptionLabel.Font.Size := 9;
+
+  // ── Welcome page — full brand makeover ──
+  WelcomeLeft := WizardForm.WelcomeLabel1.Left;
+
+  // Welcome heading
+  WizardForm.WelcomeLabel1.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel1.Font.Color := $0060C0;
+  WizardForm.WelcomeLabel1.Font.Size := 16;
+  WizardForm.WelcomeLabel1.Font.Style := [fsBold];
+
+  // Welcome body text
+  WizardForm.WelcomeLabel2.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel2.Font.Color := $333333;
+  WizardForm.WelcomeLabel2.Font.Size := 9;
+
+  // ── License page ──
+  WizardForm.LicenseMemo.Font.Name := 'Consolas';
+  WizardForm.LicenseMemo.Font.Size := 9;
+  WizardForm.LicenseMemo.Color := $FFFFFF;
+
+  // ── Components page ──
+  WizardForm.ComponentsList.Color := $FFFFFF;
+  WizardForm.TypesCombo.Color := $FFFFFF;
+
+  // ── Directory page ──
+  WizardForm.DirEdit.Color := $FFFFFF;
+
+  // ── Ready page memo ──
+  WizardForm.ReadyMemo.Font.Name := 'Segoe UI';
+  WizardForm.ReadyMemo.Font.Size := 9;
+  WizardForm.ReadyMemo.Color := $FFFFFF;
+
+  // ── Progress page ──
+  WizardForm.StatusLabel.Font.Name := 'Segoe UI';
+  WizardForm.StatusLabel.Font.Color := $444444;
+  WizardForm.ProgressGauge.Top := WizardForm.ProgressGauge.Top;
+
+  // ── Finish page — brand style ──
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedHeadingLabel.Font.Color := $0060C0;
+  WizardForm.FinishedHeadingLabel.Font.Size := 16;
+  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
+  WizardForm.FinishedLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedLabel.Font.Color := $333333;
+  WizardForm.FinishedLabel.Font.Size := 9;
+
+  // ── Inner page background ──
+  WizardForm.InnerPage.Color := $F5F2EF;
+
+  // ── Bottom button panel styling ──
+  WizardForm.NextButton.Font.Size := 9;
+  WizardForm.BackButton.Font.Size := 9;
+  WizardForm.CancelButton.Font.Size := 9;
+
+  // ── Create accent bar below header ──
+  AccentBar := TBevel.Create(WizardForm);
+  AccentBar.Parent := WizardForm.InnerPage;
+  AccentBar.Shape := bsTopLine;
+  AccentBar.Left := 0;
+  AccentBar.Top := 0;
+  AccentBar.Width := WizardForm.InnerPage.Width;
+  AccentBar.Height := 3;
+
+  // ── Create brand panel on Welcome page (right side overlay) ──
+  BrandPanel := TPanel.Create(WizardForm);
+  BrandPanel.Parent := WizardForm.WelcomeLabel1.Parent;
+  BrandPanel.Left := WelcomeLeft;
+  BrandPanel.Top := WizardForm.WelcomeLabel2.Top + WizardForm.WelcomeLabel2.Height + 20;
+  BrandPanel.Width := WizardForm.WelcomeLabel1.Width;
+  BrandPanel.Height := 90;
+  BrandPanel.Color := $F0E8E0;
+  BrandPanel.BevelOuter := bvNone;
+  BrandPanel.ParentBackground := False;
+
+  // Version info in brand panel  
+  BrandTitle := TNewStaticText.Create(WizardForm);
+  BrandTitle.Parent := BrandPanel;
+  BrandTitle.Left := 16;
+  BrandTitle.Top := 12;
+  BrandTitle.Caption := 'Foundation Game Streaming Server';
+  BrandTitle.Font.Name := 'Segoe UI';
+  BrandTitle.Font.Size := 10;
+  BrandTitle.Font.Color := $0060C0;
+  BrandTitle.Font.Style := [fsBold];
+
+  BrandSubtitle := TNewStaticText.Create(WizardForm);
+  BrandSubtitle.Parent := BrandPanel;
+  BrandSubtitle.Left := 16;
+  BrandSubtitle.Top := 38;
+  BrandSubtitle.Caption := 'v' + '{#MyAppVersion}' + '  |  Open Source  |  Low-latency';
+  BrandSubtitle.Font.Name := 'Segoe UI';
+  BrandSubtitle.Font.Size := 9;
+  BrandSubtitle.Font.Color := $666666;
+
+  // URL link in brand panel
+  BrandLogo := TBitmapImage.Create(WizardForm);
+  BrandLogo.Parent := BrandPanel;
+  BrandLogo.Left := 16;
+  BrandLogo.Top := 60;
+  // Use as a visual separator line effect (reuse the bitmap component for placement)
+end;
 
 // Check if old NSIS installation exists and offer to uninstall
 function DetectOldNSISInstall(): Boolean;
