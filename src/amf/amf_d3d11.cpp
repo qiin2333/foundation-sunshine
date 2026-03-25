@@ -477,6 +477,20 @@ namespace amf {
     encode_width = client_config.width;
     encode_height = client_config.height;
     res = encoder->Init(amf_format, client_config.width, client_config.height);
+    if (res != AMF_OK && config.rc_mode) {
+      // Init failed with custom RC mode - retry without it (driver may not support it)
+      BOOST_LOG(warning) << "AMF: Init failed with rc_mode=" << *config.rc_mode << ", retrying with default RC";
+      encoder->Terminate();
+      encoder = nullptr;
+      res = factory->CreateComponent(context, get_codec_id(), &encoder);
+      if (res == AMF_OK && encoder) {
+        auto config_fallback = config;
+        config_fallback.rc_mode = std::nullopt;
+        if (configure_encoder(config_fallback, client_config, colorspace)) {
+          res = encoder->Init(amf_format, client_config.width, client_config.height);
+        }
+      }
+    }
     if (res != AMF_OK) {
       BOOST_LOG(error) << "AMF: encoder Init failed, error: " << res;
       return false;
