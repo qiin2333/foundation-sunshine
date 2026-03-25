@@ -24,7 +24,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/support
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={code:GetPreviousInstallDir|{autopf}\{#MyAppName}}
 DefaultGroupName={#MyAppName}
 ; 管理员权限
 PrivilegesRequired=admin
