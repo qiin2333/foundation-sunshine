@@ -96,7 +96,7 @@
                   :class="selectedType === 'steam' ? 'btn-primary' : 'btn-outline-primary'"
                   @click="selectedType = 'steam'"
                   type="button"
-                  title="Steam 游戏"
+                  :title="t('apps.scan_result_filter_steam_title')"
                 >
                   <i class="fab fa-steam me-1"></i>Steam
                   <span class="badge bg-dark ms-1">{{ stats.steam }}</span>
@@ -107,7 +107,7 @@
                   :class="selectedType === 'epic' ? 'btn-dark' : 'btn-outline-dark'"
                   @click="selectedType = 'epic'"
                   type="button"
-                  title="Epic Games 游戏"
+                  :title="t('apps.scan_result_filter_epic_title')"
                 >
                   <i class="fas fa-store me-1"></i>Epic
                   <span class="badge bg-dark ms-1">{{ stats.epic }}</span>
@@ -118,7 +118,7 @@
                   :class="selectedType === 'gog' ? 'btn-secondary' : 'btn-outline-secondary'"
                   @click="selectedType = 'gog'"
                   type="button"
-                  title="GOG Galaxy 游戏"
+                  :title="t('apps.scan_result_filter_gog_title')"
                 >
                   <i class="fas fa-compact-disc me-1"></i>GOG
                   <span class="badge bg-dark ms-1">{{ stats.gog }}</span>
@@ -273,8 +273,9 @@ watch(
 
 // 当扫描结果变化时，如果有游戏则默认开启游戏过滤
 watch(
-  () => props.apps,
-  (newApps) => {
+  () => [props.apps.length, ...props.apps.map((a) => a['app-type'])],
+  () => {
+    const newApps = props.apps
     const hasGames = newApps.length > 0 && newApps.some((app) => app['is-game'] === true)
     gamesOnly.value = hasGames
     if (newApps.length > 0) {
