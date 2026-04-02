@@ -271,15 +271,32 @@ watch(
   }
 )
 
-// 当扫描结果变化时，如果有游戏则默认开启游戏过滤
+// 当 apps 引用被整体替换时（新扫描结果），重置所有筛选状态
+let prevAppsRef = null
+watch(
+  () => props.apps,
+  (newApps) => {
+    if (newApps !== prevAppsRef) {
+      prevAppsRef = newApps
+      const hasGames = newApps.length > 0 && newApps.some((app) => app['is-game'] === true)
+      gamesOnly.value = hasGames
+      selectedType.value = 'all'
+      searchQuery.value = ''
+    }
+  }
+)
+
+// 当数组内部变化时（quick-add/remove via splice），仅做防御性校正
 watch(
   () => [props.apps.length, ...props.apps.map((a) => a['app-type'])],
   () => {
-    const newApps = props.apps
-    const hasGames = newApps.length > 0 && newApps.some((app) => app['is-game'] === true)
-    gamesOnly.value = hasGames
-    selectedType.value = 'all'
-    searchQuery.value = ''
+    // 如果当前选中的 type 已经没有对应项了，回退到 'all'
+    if (selectedType.value !== 'all') {
+      const hasType = props.apps.some((app) => app['app-type'] === selectedType.value)
+      if (!hasType) {
+        selectedType.value = 'all'
+      }
+    }
   }
 )
 
