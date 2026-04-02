@@ -269,7 +269,10 @@ export function useApps() {
       const result = await tauri.core.invoke('scan_game_libraries')
 
       // 将 PlatformGame 转换为 scannedApps 格式
-      const allGames = [...result.steam, ...result.epic, ...result.gog]
+      const steamGames = result.steam || []
+      const epicGames = result.epic || []
+      const gogGames = result.gog || []
+      const allGames = [...steamGames, ...epicGames, ...gogGames]
 
       if (allGames.length === 0) {
         scannedApps.value = []
@@ -290,20 +293,20 @@ export function useApps() {
         showScanResult.value = true
 
         const parts = []
-        if (result.steam.length) parts.push(`Steam ${result.steam.length}`)
-        if (result.epic.length) parts.push(`Epic ${result.epic.length}`)
-        if (result.gog.length) parts.push(`GOG ${result.gog.length}`)
+        if (steamGames.length) parts.push(`Steam ${steamGames.length}`)
+        if (epicGames.length) parts.push(`Epic ${epicGames.length}`)
+        if (gogGames.length) parts.push(`GOG ${gogGames.length}`)
         showMessage(
-          `找到 ${result.total} 个游戏 (${parts.join(', ')})，耗时 ${result.scan_time_ms}ms`,
+          `找到 ${result.total ?? allGames.length} 个游戏 (${parts.join(', ')})，耗时 ${result.scan_time_ms ?? 0}ms`,
           APP_CONSTANTS.MESSAGE_TYPES.SUCCESS
         )
       }
 
       trackEvents.userAction('game_libraries_scanned', {
-        steam: result.steam.length,
-        epic: result.epic.length,
-        gog: result.gog.length,
-        total: result.total,
+        steam: steamGames.length,
+        epic: epicGames.length,
+        gog: gogGames.length,
+        total: result.total ?? allGames.length,
       })
     } catch (error) {
       console.error('扫描游戏库失败:', error)

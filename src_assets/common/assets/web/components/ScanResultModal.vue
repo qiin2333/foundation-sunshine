@@ -115,7 +115,7 @@
                 <button
                   v-if="stats.gog > 0"
                   class="btn"
-                  :class="selectedType === 'gog' ? 'btn-purple' : 'btn-outline-secondary'"
+                  :class="selectedType === 'gog' ? 'btn-secondary' : 'btn-outline-secondary'"
                   @click="selectedType = 'gog'"
                   type="button"
                   title="GOG Galaxy 游戏"
@@ -275,8 +275,11 @@ watch(
 watch(
   () => props.apps,
   (newApps) => {
-    if (newApps.length > 0 && newApps.some((app) => app['is-game'] === true)) {
-      gamesOnly.value = true
+    const hasGames = newApps.length > 0 && newApps.some((app) => app['is-game'] === true)
+    gamesOnly.value = hasGames
+    if (newApps.length > 0) {
+      selectedType.value = 'all'
+      searchQuery.value = ''
     }
   }
 )

@@ -53,6 +53,7 @@
             @click="scanGameLibraries()"
             :disabled="isScanning"
             title="扫描游戏平台库 (Steam/Epic/GOG)"
+            aria-label="扫描游戏平台库 (Steam/Epic/GOG)"
           >
             <i class="fas" :class="isScanning ? 'fa-spinner fa-spin' : 'fa-gamepad'"></i>
           </button>
