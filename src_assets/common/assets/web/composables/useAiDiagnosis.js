@@ -73,6 +73,17 @@ export function useAiDiagnosis() {
       error.value = '请先配置 API Key'
       return
     }
+    if (config.provider === 'custom') {
+      try {
+        const url = new URL(config.apiBase)
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          throw new Error('invalid protocol')
+        }
+      } catch {
+        error.value = '自定义提供商需要完整的 API 地址（以 http:// 或 https:// 开头）'
+        return
+      }
+    }
 
     saveConfig()
     isLoading.value = true
