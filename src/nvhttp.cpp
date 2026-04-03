@@ -2153,8 +2153,6 @@ namespace nvhttp {
       } else {
         auto result = confighttp::processAiChat(requestBody);
 
-        pt::ptree tree;
-        // Use raw response for non-XML endpoints
         SimpleWeb::CaseInsensitiveMultimap headers;
         headers.emplace("Content-Type", result.contentType);
 
