@@ -159,7 +159,7 @@
     "adapter_name_desc_linux_1": "手动指定用于捕获的 GPU。",
     "adapter_name_desc_linux_2": "找到所有能够使用 VAAPI 的设备",
     "adapter_name_desc_linux_3": "用上面的设备替换``renderD129``，列出设备的名称和功能。要获得 Sunshine 的支持，设备至少需要具备以下功能：",
-    "adapter_name_desc_windows": "手动指定用于捕获的 GPU 。如果未设置，GPU 将被自动选择。注意：此GPU 必须连接并开启显示器。如果笔记本无法启用独显直连，此处请设置为自动。",
+    "adapter_name_desc_windows": "手动指定用于捕获的 GPU 。如果未设置，GPU 将被自动选择。注意：此GPU 必须连接并开启显示器。<br>如果笔记本无法启用独显直连，此处请设置为自动。",
     "adapter_name_desc_windows_vdd_hint": "如有安装最新版基地显示器，可自动关联GPU绑定",
     "adapter_name_placeholder_windows": "Radeon RX 580 Series",
     "add": "添加",
@@ -658,6 +658,7 @@
   "setup": {
     "adapter_info": "配置摘要",
     "android_client": "安卓客户端",
+    "base_display_title": "基地显示器",
     "choose_adapter": "自动",
     "config_saved": "配置已成功保存。",
     "description": "让我们快速完成初始设置",

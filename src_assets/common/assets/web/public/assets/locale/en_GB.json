@@ -621,6 +621,7 @@
   "setup": {
     "adapter_info": "Configuration Summary",
     "android_client": "Android Client",
+    "base_display_title": "Virtual Display",
     "choose_adapter": "Auto",
     "config_saved": "Configuration has been saved successfully.",
     "description": "Let's get you started with a quick setup",

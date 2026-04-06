@@ -621,6 +621,7 @@
   "setup": {
     "adapter_info": "Yapılandırma Özeti",
     "android_client": "Android İstemcisi",
+    "base_display_title": "Sanal Ekran",
     "choose_adapter": "Otomatik",
     "config_saved": "Yapılandırma başarıyla kaydedildi.",
     "description": "Hızlı bir kurulumla başlayalım",

@@ -621,6 +621,7 @@
   "setup": {
     "adapter_info": "Résumé de la configuration",
     "android_client": "Client Android",
+    "base_display_title": "Affichage virtuel",
     "choose_adapter": "Auto",
     "config_saved": "La configuration a été enregistrée avec succès.",
     "description": "Commençons par une configuration rapide",

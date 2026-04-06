@@ -623,6 +623,7 @@
   "setup": {
     "adapter_info": "組態摘要",
     "android_client": "Android 用戶端",
+    "base_display_title": "虛擬顯示器",
     "choose_adapter": "自動",
     "config_saved": "組態已成功儲存。",
     "description": "讓我們快速開始設定",

@@ -621,6 +621,7 @@
   "setup": {
     "adapter_info": "Konfigurationssammanfattning",
     "android_client": "Android-klient",
+    "base_display_title": "Virtuell skärm",
     "choose_adapter": "Automatisk",
     "config_saved": "Konfigurationen har sparats framgångsrikt.",
     "description": "Låt oss komma igång med en snabb installation",

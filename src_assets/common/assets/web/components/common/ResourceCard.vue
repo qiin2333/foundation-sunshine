@@ -66,7 +66,7 @@
                   <i class="fab fa-android"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">Moonlight-VPLUS</span>
+                  <span class="resource-title">Moonlight-VPlus(V+)</span>
                   <span class="resource-desc">Android 推荐</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
@@ -74,32 +74,16 @@
             </div>
             <div class="col-md-6 col-lg-4">
               <a
-                class="resource-link resource-link-android"
-                href="https://github.com/WACrown/moonlight-android"
-                target="_blank"
+                class="resource-link resource-link-harmony"
+                href="javascript:void(0)"
+                @click.prevent="openHarmonyModal"
               >
                 <div class="resource-icon">
-                  <i class="fas fa-crown"></i>
+                  <i class="fas fa-mobile-alt"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">王冠版</span>
-                  <span class="resource-desc">Android</span>
-                </div>
-                <i class="fas fa-external-link-alt resource-arrow"></i>
-              </a>
-            </div>
-            <div class="col-md-6 col-lg-4">
-              <a
-                class="resource-link resource-link-apple"
-                href="https://apps.apple.com/cn/app/voidlink/id6747717070"
-                target="_blank"
-              >
-                <div class="resource-icon">
-                  <i class="fab fa-apple"></i>
-                </div>
-                <div class="resource-content">
-                  <span class="resource-title">虚空终端</span>
-                  <span class="resource-desc">iOS / iPadOS</span>
+                  <span class="resource-title">鸿蒙Moonlight V+</span>
+                  <span class="resource-desc">HarmonyOS NEXT</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
               </a>
@@ -120,6 +104,38 @@
                 <i class="fas fa-external-link-alt resource-arrow"></i>
               </a>
             </div>
+            <div class="col-md-6 col-lg-4">
+              <a
+                class="resource-link resource-link-apple"
+                href="https://apps.apple.com/cn/app/voidlink/id6747717070"
+                target="_blank"
+              >
+                <div class="resource-icon">
+                  <i class="fab fa-apple"></i>
+                </div>
+                <div class="resource-content">
+                  <span class="resource-title">虚空终端 (VoidLink)</span>
+                  <span class="resource-desc">iOS / iPadOS</span>
+                </div>
+                <i class="fas fa-external-link-alt resource-arrow"></i>
+              </a>
+            </div>
+            <div class="col-md-6 col-lg-4">
+              <a
+                class="resource-link resource-link-android"
+                href="https://github.com/WACrown/moonlight-android"
+                target="_blank"
+              >
+                <div class="resource-icon">
+                  <i class="fas fa-crown"></i>
+                </div>
+                <div class="resource-content">
+                  <span class="resource-title">王冠版</span>
+                  <span class="resource-desc">Android</span>
+                </div>
+                <i class="fas fa-external-link-alt resource-arrow"></i>
+              </a>
+            </div>
           </div>
         </div>
 
@@ -133,7 +149,7 @@
             <div class="col-12">
               <a
                 class="resource-link resource-link-github"
-                href="https://github.com/qiin2333/Sunshine-Foundation"
+                href="https://github.com/AlkaidLab/foundation-sunshine"
                 target="_blank"
               >
                 <div class="resource-icon">
@@ -213,8 +229,54 @@
         </div>
       </div>
     </div>
+
+    <!-- Harmony Link Modal -->
+    <Transition name="fade">
+      <div v-if="showHarmonyModal" class="harmony-modal-overlay" @click.self="closeHarmonyModal">
+        <div class="harmony-modal">
+          <div class="harmony-modal-header">
+            <h5>鸿蒙Moonlight V+</h5>
+            <button class="btn-close" @click="closeHarmonyModal"></button>
+          </div>
+          <div class="harmony-modal-body">
+            <p>此链接将跳转至项目仓库</p>
+            <p>鸿蒙Next Moonlight 请在鸿蒙商店内搜索 <strong>Moonlight V+</strong></p>
+          </div>
+          <div class="harmony-modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeHarmonyModal">取消</button>
+            <button type="button" class="btn btn-primary" @click="confirmHarmonyLink">
+              <i class="fas fa-external-link-alt me-1"></i>
+              前往仓库
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
+
+<script>
+export default {
+  name: 'ResourceCard',
+  data() {
+    return {
+      showHarmonyModal: false
+    }
+  },
+  methods: {
+    openHarmonyModal() {
+      this.showHarmonyModal = true
+    },
+    closeHarmonyModal() {
+      this.showHarmonyModal = false
+    },
+    confirmHarmonyLink() {
+      this.closeHarmonyModal()
+      window.open('https://github.com/AlkaidLab/moonlight-harmony', '_blank')
+    }
+  }
+}
+</script>
 
 <style scoped>
 .resource-group {
@@ -327,6 +389,11 @@
   --icon-gradient: linear-gradient(135deg, #6c757d 0%, #495057 100%);
 }
 
+.resource-link-harmony {
+  --link-color: 206, 48, 48;
+  --icon-gradient: linear-gradient(135deg, #ce3030 0%, #e74c3c 100%);
+}
+
 .resource-link-github {
   --icon-gradient: linear-gradient(135deg, #6c757d 0%, #868e96 100%);
 }
@@ -343,6 +410,7 @@
 .resource-link-apple,
 .resource-link-desktop,
 .resource-link-github,
+.resource-link-harmony,
 .resource-link-danger {
   background: linear-gradient(135deg, rgba(var(--link-color), 0.15) 0%, rgba(var(--link-color), 0.08) 100%);
 }
@@ -353,6 +421,7 @@
 .resource-link-apple .resource-icon,
 .resource-link-desktop .resource-icon,
 .resource-link-github .resource-icon,
+.resource-link-harmony .resource-icon,
 .resource-link-danger .resource-icon {
   background: var(--icon-gradient);
 }
@@ -363,6 +432,7 @@
 .resource-link-apple:hover,
 .resource-link-desktop:hover,
 .resource-link-github:hover,
+.resource-link-harmony:hover,
 .resource-link-danger:hover {
   border-color: rgba(var(--link-color), 0.4);
 }
@@ -478,6 +548,7 @@
 [data-bs-theme='dark'] .resource-link-primary,
 [data-bs-theme='dark'] .resource-link-info,
 [data-bs-theme='dark'] .resource-link-android,
+[data-bs-theme='dark'] .resource-link-harmony,
 [data-bs-theme='dark'] .resource-link-danger {
   background: linear-gradient(135deg, rgba(var(--link-color), 0.25) 0%, rgba(var(--link-color), 0.12) 100%);
 }
@@ -512,5 +583,109 @@
 
 [data-bs-theme='dark'] .resource-group {
   border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Harmony Modal */
+.harmony-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+}
+
+[data-bs-theme='light'] .harmony-modal-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.harmony-modal {
+  background: rgba(30, 30, 50, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+  animation: harmonyModalSlideUp 0.3s ease;
+}
+
+[data-bs-theme='light'] .harmony-modal {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes harmonyModalSlideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.harmony-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.harmony-modal-header h5 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+[data-bs-theme='light'] .harmony-modal-header {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-bs-theme='light'] .harmony-modal-header h5 {
+  color: #000;
+}
+
+.harmony-modal-body {
+  padding: 24px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #fff;
+}
+
+[data-bs-theme='light'] .harmony-modal-body {
+  color: #000;
+}
+
+.harmony-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme='light'] .harmony-modal-footer {
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
