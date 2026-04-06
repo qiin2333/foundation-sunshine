@@ -239,14 +239,14 @@
             <button class="btn-close" @click="closeHarmonyModal"></button>
           </div>
           <div class="harmony-modal-body">
-            <p>此链接将跳转至项目仓库</p>
-            <p>鸿蒙Next Moonlight 请在鸿蒙商店内搜索 <strong>Moonlight V+</strong></p>
+            <p>{{ $t('setup.harmony_modal_link_notice') }}</p>
+            <p>{{ $t('setup.harmony_modal_desc') }}</p>
           </div>
           <div class="harmony-modal-footer">
-            <button type="button" class="btn btn-secondary" @click="closeHarmonyModal">取消</button>
+            <button type="button" class="btn btn-secondary" @click="closeHarmonyModal">{{ $t('_common.cancel') }}</button>
             <button type="button" class="btn btn-primary" @click="confirmHarmonyLink">
               <i class="fas fa-external-link-alt me-1"></i>
-              前往仓库
+              {{ $t('setup.harmony_goto_repo') }}
             </button>
           </div>
         </div>
