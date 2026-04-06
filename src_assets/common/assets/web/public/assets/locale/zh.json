@@ -53,6 +53,7 @@
     "command_settings": "命令设置",
     "covers_found": "找到的封面",
     "delete": "删除",
+    "delete_confirm": "确定要删除应用 \"{name}\" 吗？",
     "detached_cmds": "独立命令",
     "detached_cmds_add": "添加独立命令",
     "detached_cmds_desc": "在后台运行的命令列表",
@@ -651,6 +652,7 @@
     "legal_desc": "继续使用本软件即表示您同意以下文档中的条款和条件。",
     "license": "许可协议",
     "lizardbyte_website": "LizardByte 网站",
+    "official_website": "官方网站",
     "resources": "相关资源",
     "resources_desc": "Sunshine 相关资源！",
     "third_party_notice": "第三方通知"

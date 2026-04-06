@@ -53,6 +53,7 @@
     "command_settings": "Impostazioni comando",
     "covers_found": "Copertine trovate",
     "delete": "Cancella",
+    "delete_confirm": "Sei sicuro di voler eliminare \"{name}\"?",
     "detached_cmds": "Comandi Separati",
     "detached_cmds_add": "Aggiungi comando separato",
     "detached_cmds_desc": "Un elenco di comandi da eseguire in background.",
@@ -614,6 +615,7 @@
     "legal_desc": "Continuando a utilizzare questo software si accettano i termini e le condizioni riportati nei seguenti documenti.",
     "license": "Licenza",
     "lizardbyte_website": "Sito web di LizardByte",
+    "official_website": "Sito ufficiale",
     "resources": "Risorse",
     "resources_desc": "Risorse per Sunshine!",
     "third_party_notice": "Avvisi di terze parti"

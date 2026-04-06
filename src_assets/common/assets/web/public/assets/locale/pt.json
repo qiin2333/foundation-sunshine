@@ -53,6 +53,7 @@
     "command_settings": "Configurações de comando",
     "covers_found": "Capas encontradas",
     "delete": "excluir",
+    "delete_confirm": "Tem certeza de que deseja excluir \"{name}\"?",
     "detached_cmds": "Comandos desanexados",
     "detached_cmds_add": "Adicionar Comando Desanexado",
     "detached_cmds_desc": "Uma lista de comandos a serem executados em segundo plano.",
@@ -614,6 +615,7 @@
     "legal_desc": "Ao continuar a usar este software, você concorda com os termos e condições nos seguintes documentos.",
     "license": "Tipo:",
     "lizardbyte_website": "Portal LizardByte",
+    "official_website": "Site oficial",
     "resources": "Recursos",
     "resources_desc": "Recursos para luz solar!",
     "third_party_notice": "Aviso de terceiros"

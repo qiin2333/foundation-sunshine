@@ -53,6 +53,7 @@
     "command_settings": "Paramètres de commande",
     "covers_found": "Jaquettes trouvées",
     "delete": "Supprimer",
+    "delete_confirm": "Êtes-vous sûr de vouloir supprimer \"{name}\" ?",
     "detached_cmds": "Commandes détachées",
     "detached_cmds_add": "Ajouter une commande détachée",
     "detached_cmds_desc": "Une liste de commandes à exécuter en arrière-plan.",
@@ -614,6 +615,7 @@
     "legal_desc": "En continuant à utiliser ce logiciel, vous acceptez les termes et conditions des documents suivants.",
     "license": "Licence",
     "lizardbyte_website": "Site web de LizardByte",
+    "official_website": "Site officiel",
     "resources": "Ressources",
     "resources_desc": "Ressources pour Sunshine !",
     "third_party_notice": "Avis aux tiers"

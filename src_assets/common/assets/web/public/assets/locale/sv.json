@@ -53,6 +53,7 @@
     "command_settings": "Kommandoinställningar",
     "covers_found": "Hittade omslag",
     "delete": "Radera",
+    "delete_confirm": "Är du säker på att du vill radera \"{name}\"?",
     "detached_cmds": "Fristående kommandon",
     "detached_cmds_add": "Lägg till fristående kommando",
     "detached_cmds_desc": "En lista över kommandon som ska köras i bakgrunden.",
@@ -614,6 +615,7 @@
     "legal_desc": "Genom att fortsätta använda denna programvara godkänner du villkoren i följande dokument.",
     "license": "Licens",
     "lizardbyte_website": "Webbplats LizardByte",
+    "official_website": "Officiell webbplats",
     "resources": "Resurser",
     "resources_desc": "Resurser för Sunshine!",
     "third_party_notice": "Meddelande från tredje part"

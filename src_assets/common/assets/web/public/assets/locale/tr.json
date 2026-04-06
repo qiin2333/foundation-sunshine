@@ -53,6 +53,7 @@
     "command_settings": "Komut Ayarları",
     "covers_found": "Kapaklar Bulundu",
     "delete": "Sil",
+    "delete_confirm": "\"{name}\" uygulamasını silmek istediğinizden emin misiniz?",
     "detached_cmds": "Müstakil Komutlar",
     "detached_cmds_add": "Müstakil Komut Ekleme",
     "detached_cmds_desc": "Arka planda çalıştırılacak komutların bir listesi.",
@@ -614,6 +615,7 @@
     "legal_desc": "Bu yazılımı kullanmaya devam ederek aşağıdaki belgelerde yer alan hüküm ve koşulları kabul etmiş olursunuz.",
     "license": "Lisans",
     "lizardbyte_website": "LizardByte Web Sitesi",
+    "official_website": "Resmi web sitesi",
     "resources": "Kaynaklar",
     "resources_desc": "Günışığı için Kaynaklar!",
     "third_party_notice": "Üçüncü Taraf Bildirimi"

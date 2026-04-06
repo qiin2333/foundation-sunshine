@@ -53,6 +53,7 @@
     "command_settings": "Настройки команд",
     "covers_found": "Найденные обложки",
     "delete": "Удалить",
+    "delete_confirm": "Вы уверены, что хотите удалить \"{name}\"?",
     "detached_cmds": "Независимые команды",
     "detached_cmds_add": "Добавить независимую команду",
     "detached_cmds_desc": "Список команд, работающих в фоновом режиме.",
@@ -614,6 +615,7 @@
     "legal_desc": "Используя данное ПО, вы соглашаетесь с условиями, изложенными в следующих документах.",
     "license": "Лицензия",
     "lizardbyte_website": "Сайт LizardByte",
+    "official_website": "Официальный сайт",
     "resources": "Полезные источники",
     "resources_desc": "Полезные ресурсы, посвящённые Sunshine!",
     "third_party_notice": "Уведомление о третьих сторонах"
