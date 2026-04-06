@@ -271,8 +271,8 @@ export default {
       this.showHarmonyModal = false
     },
     confirmHarmonyLink() {
-      this.closeHarmonyModal()
       window.open('https://github.com/AlkaidLab/moonlight-harmony', '_blank')
+      this.closeHarmonyModal()
     }
   }
 }

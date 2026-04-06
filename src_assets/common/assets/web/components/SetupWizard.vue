@@ -351,6 +351,7 @@
     </Transition>
 
     <!-- Harmony Link Modal -->
+    <Teleport to="body">
     <Transition name="fade">
       <div v-if="showHarmonyModal" class="skip-wizard-overlay" @click.self="closeHarmonyModal">
         <div class="skip-wizard-modal">
@@ -372,11 +373,13 @@
         </div>
       </div>
     </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script>
 import { trackEvents } from '../config/firebase.js'
+import { openExternalUrl } from '../utils/helpers.js'
 
 export default {
   name: 'SetupWizard',
@@ -587,9 +590,13 @@ export default {
     closeHarmonyModal() {
       this.showHarmonyModal = false
     },
-    confirmHarmonyLink() {
+    async confirmHarmonyLink() {
       this.closeHarmonyModal()
-      window.open('https://github.com/AlkaidLab/moonlight-harmony', '_blank')
+      try {
+        await openExternalUrl('https://github.com/AlkaidLab/moonlight-harmony')
+      } catch (error) {
+        console.error('Failed to open URL:', error)
+      }
     },
     async confirmSkipWizard() {
       // 关闭模态框
