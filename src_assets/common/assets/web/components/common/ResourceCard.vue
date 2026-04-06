@@ -9,13 +9,49 @@
         </h5>
       </div>
       <div class="card-body">
-        <p class="text-muted mb-4">{{ $t('resource_card.resources_desc') }}</p>
+
+        <!-- 基地官网 -->
+        <div class="resource-group mb-4">
+          <h6 class="resource-group-title">
+            <i class="fas fa-globe text-primary me-2"></i>
+            {{ $t('resource_card.official_website') }}
+          </h6>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <a class="resource-link resource-link-primary" :href="officialWebsiteUrl" target="_blank">
+                <div class="resource-icon">
+                  <i class="fas fa-globe"></i>
+                </div>
+                <div class="resource-content">
+                  <span class="resource-title">{{ $t('resource_card.official_website_title') }}</span>
+                </div>
+                <i class="fas fa-external-link-alt resource-arrow"></i>
+              </a>
+            </div>
+            <div class="col-md-6">
+              <a
+                class="resource-link resource-link-github"
+                href="https://github.com/AlkaidLab/foundation-sunshine"
+                target="_blank"
+              >
+                <div class="resource-icon">
+                  <i class="fab fa-github"></i>
+                </div>
+                <div class="resource-content">
+                  <span class="resource-title">Sunshine Foundation</span>
+                  <span class="resource-desc">{{ $t('resource_card.open_source_desc') }}</span>
+                </div>
+                <i class="fas fa-star resource-arrow text-warning"></i>
+              </a>
+            </div>
+          </div>
+        </div>
 
         <!-- 快速入门 -->
         <div class="resource-group mb-4">
           <h6 class="resource-group-title">
             <i class="fas fa-rocket text-success me-2"></i>
-            快速入门
+            {{ $t('resource_card.quick_start') }}
           </h6>
           <div class="row g-3">
             <div class="col-md-6">
@@ -28,8 +64,8 @@
                   <i class="fas fa-file-alt"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">使用教程</span>
-                  <span class="resource-desc">详细的配置与使用指南</span>
+                  <span class="resource-title">{{ $t('resource_card.tutorial') }}</span>
+                  <span class="resource-desc">{{ $t('resource_card.tutorial_desc') }}</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
               </a>
@@ -40,8 +76,8 @@
                   <i class="fab fa-qq"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">加入串流裙</span>
-                  <span class="resource-desc">获取帮助与交流经验</span>
+                  <span class="resource-title">{{ $t('resource_card.join_group') }}</span>
+                  <span class="resource-desc">{{ $t('resource_card.join_group_desc') }}</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
               </a>
@@ -53,7 +89,7 @@
         <div class="resource-group mb-4">
           <h6 class="resource-group-title">
             <i class="fas fa-download text-primary me-2"></i>
-            客户端下载
+            {{ $t('resource_card.client_downloads') }}
           </h6>
           <div class="row g-3">
             <div class="col-md-6 col-lg-4">
@@ -66,8 +102,8 @@
                   <i class="fab fa-android"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">Moonlight-VPlus(V+)</span>
-                  <span class="resource-desc">Android 推荐</span>
+                  <span class="resource-title">安卓 Moonlight V+</span>
+                  <span class="resource-desc">Android / Android TV</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
               </a>
@@ -82,7 +118,7 @@
                   <i class="fas fa-mobile-alt"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">鸿蒙Moonlight V+</span>
+                  <span class="resource-title">{{ $t('resource_card.harmony_client') }}</span>
                   <span class="resource-desc">HarmonyOS NEXT</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
@@ -98,7 +134,7 @@
                   <i class="fas fa-desktop"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">Moonlight-PC</span>
+                  <span class="resource-title">Moonlight PC</span>
                   <span class="resource-desc">Windows / macOS / Linux</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
@@ -114,13 +150,23 @@
                   <i class="fab fa-apple"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">虚空终端 (VoidLink)</span>
+                  <span class="resource-title">{{ $t('resource_card.voidlink_title') }}</span>
                   <span class="resource-desc">iOS / iPadOS</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
               </a>
             </div>
-            <div class="col-md-6 col-lg-4">
+          </div>
+        </div>
+
+        <!-- 友情链接 -->
+        <div class="resource-group">
+          <h6 class="resource-group-title">
+            <i class="fas fa-code-branch text-dark me-2"></i>
+            {{ $t('resource_card.third_party_moonlight') }}
+          </h6>
+          <div class="row g-3">
+            <div class="col-md-6">
               <a
                 class="resource-link resource-link-android"
                 href="https://github.com/WACrown/moonlight-android"
@@ -130,36 +176,10 @@
                   <i class="fas fa-crown"></i>
                 </div>
                 <div class="resource-content">
-                  <span class="resource-title">王冠版</span>
+                  <span class="resource-title">{{ $t('resource_card.crown_edition') }}</span>
                   <span class="resource-desc">Android</span>
                 </div>
                 <i class="fas fa-external-link-alt resource-arrow"></i>
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <!-- 开源项目 -->
-        <div class="resource-group">
-          <h6 class="resource-group-title">
-            <i class="fab fa-github text-dark me-2"></i>
-            开源项目
-          </h6>
-          <div class="row g-3">
-            <div class="col-12">
-              <a
-                class="resource-link resource-link-github"
-                href="https://github.com/AlkaidLab/foundation-sunshine"
-                target="_blank"
-              >
-                <div class="resource-icon">
-                  <i class="fab fa-github"></i>
-                </div>
-                <div class="resource-content">
-                  <span class="resource-title">Sunshine Foundation</span>
-                  <span class="resource-desc">Star & Fork 支持项目发展</span>
-                </div>
-                <i class="fas fa-star resource-arrow text-warning"></i>
               </a>
             </div>
           </div>
@@ -205,7 +225,7 @@
               </div>
               <div class="resource-content">
                 <span class="resource-title">{{ $t('resource_card.license') }}</span>
-                <span class="resource-desc">查看完整许可证</span>
+                <span class="resource-desc">{{ $t('resource_card.view_license') }}</span>
               </div>
               <i class="fas fa-external-link-alt resource-arrow"></i>
             </a>
@@ -221,7 +241,7 @@
               </div>
               <div class="resource-content">
                 <span class="resource-title">{{ $t('resource_card.third_party_notice') }}</span>
-                <span class="resource-desc">第三方组件声明</span>
+                <span class="resource-desc">{{ $t('resource_card.third_party_desc') }}</span>
               </div>
               <i class="fas fa-external-link-alt resource-arrow"></i>
             </a>
@@ -235,7 +255,7 @@
       <div v-if="showHarmonyModal" class="harmony-modal-overlay" @click.self="closeHarmonyModal">
         <div class="harmony-modal">
           <div class="harmony-modal-header">
-            <h5>鸿蒙Moonlight V+</h5>
+            <h5>{{ $t('resource_card.harmony_client') }}</h5>
             <button class="btn-close" @click="closeHarmonyModal"></button>
           </div>
           <div class="harmony-modal-body">
@@ -261,6 +281,11 @@ export default {
   data() {
     return {
       showHarmonyModal: false
+    }
+  },
+  computed: {
+    officialWebsiteUrl() {
+      return 'https://www.alkaidlab.com/'
     }
   },
   methods: {

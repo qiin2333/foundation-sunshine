@@ -231,8 +231,8 @@
                        target="_blank">
                       <div class="resource-icon"><i class="fab fa-android"></i></div>
                       <div class="resource-content">
-                        <span class="resource-title">Moonlight-VPlus(V+)</span>
-                        <span class="resource-desc">Android 推荐</span>
+                        <span class="resource-title">安卓 Moonlight V+</span>
+                        <span class="resource-desc">Android / Android TV</span>
                       </div>
                       <i class="fas fa-external-link-alt resource-arrow"></i>
                     </a>
@@ -241,7 +241,7 @@
                        @click.prevent="openHarmonyModal">
                       <div class="resource-icon"><i class="fas fa-mobile-alt"></i></div>
                       <div class="resource-content">
-                        <span class="resource-title">鸿蒙Moonlight V+</span>
+                        <span class="resource-title">鸿蒙 Moonlight V+</span>
                         <span class="resource-desc">HarmonyOS NEXT</span>
                       </div>
                       <i class="fas fa-external-link-alt resource-arrow"></i>
@@ -261,7 +261,7 @@
                        target="_blank">
                       <div class="resource-icon"><i class="fas fa-desktop"></i></div>
                       <div class="resource-content">
-                        <span class="resource-title">Moonlight-PC</span>
+                        <span class="resource-title">Moonlight PC</span>
                         <span class="resource-desc">Windows / macOS / Linux</span>
                       </div>
                       <i class="fas fa-external-link-alt resource-arrow"></i>
