@@ -1566,14 +1566,24 @@ namespace nvhttp {
         return;
       }
 
-      // Parse mode
-      abr::mode_e mode = abr::mode_e::BALANCED;
+      // Parse and validate mode
       std::string mode_str = body.value("mode", "balanced");
-      if (mode_str == "quality") {
+      abr::mode_e mode;
+      if (mode_str == "balanced") {
+        mode = abr::mode_e::BALANCED;
+      }
+      else if (mode_str == "quality") {
         mode = abr::mode_e::QUALITY;
       }
       else if (mode_str == "lowLatency") {
         mode = abr::mode_e::LOW_LATENCY;
+      }
+      else {
+        json err;
+        err["success"] = false;
+        err["error"] = "Invalid mode: must be 'balanced', 'quality', or 'lowLatency'";
+        response->write(SimpleWeb::StatusCode::client_error_bad_request, err.dump(), headers);
+        return;
       }
 
       abr::config_t cfg;
@@ -1581,6 +1591,22 @@ namespace nvhttp {
       cfg.min_bitrate_kbps = body.value("minBitrate", 0);
       cfg.max_bitrate_kbps = body.value("maxBitrate", 0);
       cfg.mode = mode;
+
+      // Validate bitrate range
+      if (cfg.min_bitrate_kbps < 0 || cfg.max_bitrate_kbps < 0) {
+        json err;
+        err["success"] = false;
+        err["error"] = "minBitrate and maxBitrate must be non-negative";
+        response->write(SimpleWeb::StatusCode::client_error_bad_request, err.dump(), headers);
+        return;
+      }
+      if (cfg.min_bitrate_kbps > 0 && cfg.max_bitrate_kbps > 0 && cfg.min_bitrate_kbps > cfg.max_bitrate_kbps) {
+        json err;
+        err["success"] = false;
+        err["error"] = "minBitrate must not exceed maxBitrate";
+        response->write(SimpleWeb::StatusCode::client_error_bad_request, err.dump(), headers);
+        return;
+      }
 
       int initial_bitrate = client.bitrate > 0 ? client.bitrate
                             : cfg.max_bitrate_kbps > 0 ? cfg.max_bitrate_kbps
