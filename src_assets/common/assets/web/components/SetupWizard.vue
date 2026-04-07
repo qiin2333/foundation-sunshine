@@ -374,6 +374,35 @@
       </div>
     </Transition>
     </Teleport>
+
+    <!-- Restart Countdown Modal -->
+    <Teleport to="body">
+    <Transition name="fade">
+      <div v-if="showRestartModal" class="skip-wizard-overlay">
+        <div class="skip-wizard-modal">
+          <div class="skip-wizard-header">
+            <h5><i class="fas fa-sync-alt me-2"></i>{{ $t('setup.restart_title') }}</h5>
+          </div>
+          <div class="skip-wizard-body text-center">
+            <p>{{ $t('setup.restart_desc') }}</p>
+            <div class="restart-countdown my-3">
+              <span class="display-4 fw-bold text-primary">{{ restartCountdown }}</span>
+              <p class="text-muted mt-1">{{ $t('setup.restart_countdown_unit') }}</p>
+            </div>
+            <div class="progress" style="height: 6px;">
+              <div class="progress-bar bg-primary" :style="{ width: (restartCountdown / 8 * 100) + '%' }" role="progressbar"></div>
+            </div>
+          </div>
+          <div class="skip-wizard-footer">
+            <button type="button" class="btn btn-primary" @click="skipRestartCountdown">
+              <i class="fas fa-arrow-right me-1"></i>
+              {{ $t('setup.restart_go_now') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -409,6 +438,9 @@ export default {
       saving: false,
       showSkipModal: false, // 跳过向导确认弹窗
       showHarmonyModal: false, // 鸿蒙链接提醒弹窗
+      showRestartModal: false, // 重启倒计时弹窗
+      restartCountdown: 8, // 倒计时秒数
+      restartTimer: null, // 倒计时定时器
       // 客户端下载链接
       androidQrCode: 'https://assets.alkaidlab.com/androidQrCode.png',
       iosQrCode: 'https://assets.alkaidlab.com/iosQrCode.png',
@@ -436,6 +468,12 @@ export default {
     // 如果只有一个显卡，自动选择
     if (this.uniqueAdapters.length === 1) {
       this.selectedAdapter = this.uniqueAdapters[0].name
+    }
+  },
+  beforeUnmount() {
+    if (this.restartTimer) {
+      clearInterval(this.restartTimer)
+      this.restartTimer = null
     }
   },
   computed: {
@@ -654,7 +692,36 @@ export default {
       trackEvents.userAction('setup_go_to_apps', {
         from_step: this.currentStep
       })
-      window.location.href = '/apps'
+      // 触发重启并显示倒计时
+      this.triggerRestartAndRedirect()
+    },
+    async triggerRestartAndRedirect() {
+      // 调用重启 API
+      try {
+        await fetch('/api/restart', { method: 'POST' })
+      } catch {
+        // 重启请求可能会断开连接，忽略错误
+      }
+      // 显示倒计时弹窗
+      this.showRestartModal = true
+      this.restartCountdown = 8
+      this.restartTimer = setInterval(() => {
+        this.restartCountdown--
+        if (this.restartCountdown <= 0) {
+          this.finishRedirect()
+        }
+      }, 1000)
+    },
+    skipRestartCountdown() {
+      this.finishRedirect()
+    },
+    finishRedirect() {
+      if (this.restartTimer) {
+        clearInterval(this.restartTimer)
+        this.restartTimer = null
+      }
+      this.showRestartModal = false
+      window.location.href = '/'
     },
     getDisplayName(device) {
       // 解析 device.data，提取友好名称

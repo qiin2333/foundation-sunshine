@@ -196,7 +196,7 @@
         </h5>
       </div>
       <div class="card-body">
-        <p class="text-muted mb-4">{{ $t('resource_card.legal_desc') }}</p>
+        <p class="mb-4">{{ $t('resource_card.legal_desc') }}</p>
 
         <!-- GPL v3.0 Badge -->
         <div class="gpl-badge mb-4">
@@ -206,7 +206,7 @@
               GNU General Public License v3.0
             </span>
           </div>
-          <p class="text-center text-muted small mt-2 mb-0">
+          <p class="text-center small mt-2 mb-0">
             {{ $t('resource_card.gpl_license_text_1') }}
             <br />
             {{ $t('resource_card.gpl_license_text_2') }}
