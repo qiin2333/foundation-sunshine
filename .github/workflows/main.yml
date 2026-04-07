@@ -169,9 +169,6 @@ jobs:
           echo "  Ninja: $(ninja --version)"
           echo "  GCC: $(gcc --version | head -1)"
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
       - name: Cache npm dependencies
         uses: actions/cache@v4
         with:
@@ -186,7 +183,6 @@ jobs:
           BUILD_VERSION: ${{ needs.setup_release.outputs.release_tag }}.杂鱼
           COMMIT: ${{ needs.setup_release.outputs.release_commit }}
           GITHUB_TOKEN: ${{ secrets.DRIVER_DOWNLOAD_TOKEN }}
-          SCCACHE_GHA_ENABLED: "true"
         run: |
           mkdir -p build
           cmake \
@@ -194,8 +190,6 @@ jobs:
             -G Ninja \
             -S . \
             -DBUILD_DOCS=OFF \
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DSUNSHINE_ASSETS_DIR=assets \
             -DSUNSHINE_PUBLISHER_NAME='${{ github.repository_owner }}' \
             -DSUNSHINE_PUBLISHER_WEBSITE='https://github.com/qiin2333/Sunshine-Foundation' \
