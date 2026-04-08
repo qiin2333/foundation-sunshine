@@ -154,24 +154,6 @@ namespace display_device {
     destroy_vdd_monitor();
 
     /**
-     * @brief Enable VDD driver
-     */
-    void
-    enable_vdd();
-
-    /**
-     * @brief Disable VDD driver
-     */
-    void
-    disable_vdd();
-
-    /**
-     * @brief Disable and enable VDD driver
-     */
-    void
-    disable_enable_vdd();
-
-    /**
      * @brief Toggle display power
      */
     bool

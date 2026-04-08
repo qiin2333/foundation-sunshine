@@ -12,6 +12,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <filesystem>
 #include <future>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
@@ -37,6 +38,8 @@ namespace display_device {
     const DWORD kPipeBufferSize = 4096;
     const std::chrono::milliseconds kDefaultDebounceInterval { 2000 };
 
+    // 全局状态保护锁
+    static std::mutex vdd_state_mutex;
     // 上次切换显示器的时间点
     static std::chrono::steady_clock::time_point last_toggle_time { std::chrono::steady_clock::now() };
     // 防抖间隔
@@ -93,7 +96,12 @@ namespace display_device {
         auto child = platf::run_command(true, true, cmd, working_dir, _env, nullptr, ec, nullptr);
         if (!ec) {
           BOOST_LOG(info) << "成功执行VDD " << action_str << " 命令";
-          child.detach();
+          // 等待进程完成，避免资源泄漏
+          std::error_code wait_ec;
+          child.wait(wait_ec);
+          if (wait_ec) {
+            BOOST_LOG(warning) << "等待VDD命令进程完成时出错: " << wait_ec.message();
+          }
           return true;
         }
 
@@ -278,7 +286,11 @@ namespace display_device {
       std::wstring command = L"CREATEMONITOR";
 
       // 如果没有提供UUID，使用上一次的UUID
-      std::string identifier_to_use = client_identifier.empty() && !last_used_client_uuid.empty() ? last_used_client_uuid : client_identifier;
+      std::string identifier_to_use;
+      {
+        std::lock_guard<std::mutex> lock(vdd_state_mutex);
+        identifier_to_use = client_identifier.empty() && !last_used_client_uuid.empty() ? last_used_client_uuid : client_identifier;
+      }
 
       if (identifier_to_use != client_identifier && !identifier_to_use.empty()) {
         BOOST_LOG(info) << "未提供客户端标识符，使用上一次的UUID: " << identifier_to_use;
@@ -318,6 +330,7 @@ namespace display_device {
 
       // 如果使用了有效的UUID，更新上一次使用的UUID
       if (!identifier_to_use.empty()) {
+        std::lock_guard<std::mutex> lock(vdd_state_mutex);
         last_used_client_uuid = identifier_to_use;
       }
 
@@ -410,16 +423,19 @@ namespace display_device {
     toggle_display_power() {
       auto now = std::chrono::steady_clock::now();
 
-      if (now - last_toggle_time < debounce_interval) {
-        BOOST_LOG(debug) << "忽略快速重复的显示器开关请求，请等待"
-                         << std::chrono::duration_cast<std::chrono::seconds>(
-                              debounce_interval - (now - last_toggle_time))
-                              .count()
-                         << "秒";
-        return false;
-      }
+      {
+        std::lock_guard<std::mutex> lock(vdd_state_mutex);
+        if (now - last_toggle_time < debounce_interval) {
+          BOOST_LOG(debug) << "忽略快速重复的显示器开关请求，请等待"
+                           << std::chrono::duration_cast<std::chrono::seconds>(
+                                debounce_interval - (now - last_toggle_time))
+                                .count()
+                           << "秒";
+          return false;
+        }
 
-      last_toggle_time = now;
+        last_toggle_time = now;
+      }
 
       if (is_display_on()) {
         destroy_vdd_monitor();
