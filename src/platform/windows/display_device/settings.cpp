@@ -204,6 +204,26 @@ namespace display_device {
     }
 
     /**
+     * @brief Remove VDD device entries from a device_id-keyed map.
+     *
+     * VDD device IDs are unstable (change on destroy/recreate), so they should not be
+     * persisted. This function removes them before saving to persistent_data.
+     */
+    template<typename MapT>
+    void
+    filter_vdd_devices(MapT &map) {
+      for (auto it = map.begin(); it != map.end();) {
+        if (get_display_friendly_name(it->first) == ZAKO_NAME) {
+          BOOST_LOG(debug) << "Excluding VDD device from persistence: " << it->first;
+          it = map.erase(it);
+        }
+        else {
+          ++it;
+        }
+      }
+    }
+
+    /**
      * @brief Modify the display modes based on the configuration and previously configured display modes.
      *
      * The function performs the necessary steps for changing the display modes if needed.
@@ -911,6 +931,7 @@ namespace display_device {
         return { apply_result_t::result_e::modes_fail };
       }
       current_settings.original_modes = *original_modes;
+      filter_vdd_devices(current_settings.original_modes);
 
       // 如果有HDR切换操作，等待其他操作稳定后再进行HDR切换
       if (config.change_hdr_state) {
@@ -926,6 +947,7 @@ namespace display_device {
         return { apply_result_t::result_e::hdr_states_fail };
       }
       current_settings.original_hdr_states = *original_hdr_states;
+      filter_vdd_devices(current_settings.original_hdr_states);
 
       save_guard.disable();
       return persist_settings();
