@@ -601,6 +601,10 @@ namespace display_device {
 
   boost::optional<parsed_config_t>
   make_parsed_config(const config::video_t &config, const rtsp_stream::launch_session_t &session, bool is_reconfigure) {
+    // 配置优先级（高→低）：
+    //   显示器ID: SUNSHINE_CLIENT_DISPLAY_NAME (客户端) > config.output_name (服务端)
+    //   屏幕模式: custom_screen_mode (客户端) > config.display_device_prep (服务端)
+    //   VDD决策:  session.use_vdd (客户端) > 设备不可用 > VDD设备检测
     parsed_config_t parsed_config;
     
     // 优先使用客户端指定的显示器名称，如果没有则使用全局配置
