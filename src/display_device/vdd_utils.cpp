@@ -171,7 +171,7 @@ namespace display_device {
       HandleGuard event_guard { overlapped.hEvent };
 
       // 发送命令（使用宽字符版本）
-      DWORD bytesWritten;
+      DWORD bytesWritten = 0;
       size_t cmd_len = (wcslen(command) + 1) * sizeof(wchar_t);  // 包含终止符
       if (!WriteFile(hPipe, command, (DWORD) cmd_len, &bytesWritten, &overlapped)) {
         if (GetLastError() != ERROR_IO_PENDING) {
@@ -183,13 +183,27 @@ namespace display_device {
         DWORD waitResult = WaitForSingleObject(overlapped.hEvent, kPipeTimeoutMs);
         if (waitResult != WAIT_OBJECT_0) {
           BOOST_LOG(error) << L"发送" << command << L"命令超时";
+          CancelIo(hPipe);
           return false;
         }
+
+        if (!GetOverlappedResult(hPipe, &overlapped, &bytesWritten, FALSE)) {
+          BOOST_LOG(error) << "获取写入结果失败，错误代码: " << GetLastError();
+          return false;
+        }
+      }
+
+      if (bytesWritten != (DWORD) cmd_len) {
+        BOOST_LOG(error) << "写入字节数不完整: " << bytesWritten << "/" << cmd_len;
+        return false;
       }
 
       // 读取响应
       bool read_timed_out = false;
       if (response) {
+        // 重置 event 用于读操作
+        ResetEvent(overlapped.hEvent);
+
         char buffer[kPipeBufferSize];
         DWORD bytesRead = 0;
         if (!ReadFile(hPipe, buffer, sizeof(buffer) - 1, &bytesRead, &overlapped)) {
@@ -385,6 +399,11 @@ namespace display_device {
 
     void
     destroy_vdd_monitor_nolog() {
+      // 先检查管道是否可用（超时1秒），避免在析构时无限等待
+      if (!WaitNamedPipeW(kVddPipeName, 1000)) {
+        return;
+      }
+
       HANDLE hPipe = CreateFileW(
         kVddPipeName,
         GENERIC_READ | GENERIC_WRITE,
@@ -397,16 +416,6 @@ namespace display_device {
         WriteFile(hPipe, cmd, sizeof(cmd), &bytesWritten, NULL);
         CloseHandle(hPipe);
       }
-    }
-
-    void
-    enable_vdd() {
-      execute_vdd_command(vdd_action_e::enable);
-    }
-
-    void
-    disable_vdd() {
-      execute_vdd_command(vdd_action_e::disable);
     }
 
     void
@@ -481,11 +490,20 @@ namespace display_device {
       }
 
       // 后台线程确保VDD处于扩展模式，并进行二次确认
-      std::thread([vdd_device_id = find_device_by_friendlyname(ZAKO_NAME), physical_devices_before]() mutable {
+      // 使用 static jthread 保证：
+      //   1. 新调用前旧线程会被停止（jthread 析构时通过 stop_token 请求停止）
+      //   2. Sunshine 关闭时线程能正确终止
+      static std::jthread toggle_thread;
+      toggle_thread = std::jthread([vdd_device_id = find_device_by_friendlyname(ZAKO_NAME), physical_devices_before](std::stop_token stoken) mutable {
         if (vdd_device_id.empty()) {
-          std::this_thread::sleep_for(std::chrono::seconds(2));
+          for (int i = 0; i < 10 && !stoken.stop_requested(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+          }
+          if (stoken.stop_requested()) return;
           vdd_device_id = find_device_by_friendlyname(ZAKO_NAME);
         }
+
+        if (stoken.stop_requested()) return;
 
         if (vdd_device_id.empty()) {
           BOOST_LOG(warning) << "无法找到基地显示器设备，跳过配置";
@@ -498,24 +516,42 @@ namespace display_device {
           }
         }
 
-        // 创建后二次确认，20秒超时
-        constexpr auto timeout = std::chrono::seconds(20);
-        std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_TITLE));
-        std::wstring confirm_message = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_MSG));
+        if (stoken.stop_requested()) return;
 
-        auto future = std::async(std::launch::async, [&]() {
-          return MessageBoxW(nullptr, confirm_message.c_str(), dialog_title.c_str(), MB_YESNO | MB_ICONQUESTION) == IDYES;
+        // 创建后二次确认，20秒超时
+        // 注意：dialog strings 作为值拷贝（不捕获引用），避免生命周期问题
+        std::wstring dialog_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_TITLE));
+        std::wstring confirm_msg = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_MSG));
+
+        // 使用副本传入 async，避免引用捕获
+        auto future = std::async(std::launch::async, [title = dialog_title, msg = confirm_msg]() {
+          return MessageBoxW(nullptr, msg.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION) == IDYES;
         });
 
-        if (future.wait_for(timeout) == std::future_status::ready && future.get()) {
+        constexpr auto timeout = std::chrono::seconds(20);
+        // 轮询等待，响应 stop_token
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        bool got_response = false;
+        bool user_confirmed = false;
+        while (std::chrono::steady_clock::now() < deadline && !stoken.stop_requested()) {
+          if (future.wait_for(std::chrono::milliseconds(200)) == std::future_status::ready) {
+            got_response = true;
+            user_confirmed = future.get();
+            break;
+          }
+        }
+
+        if (stoken.stop_requested()) return;
+
+        if (got_response && user_confirmed) {
           BOOST_LOG(info) << "用户确认保留基地显示器";
           return;
         }
 
         BOOST_LOG(info) << "用户未确认或超时，自动销毁基地显示器";
 
-        std::wstring w_dialog_title = system_tray_i18n::utf8_to_wstring(system_tray_i18n::get_localized_string(system_tray_i18n::KEY_VDD_CONFIRM_KEEP_TITLE));
-        if (HWND hwnd = FindWindowW(L"#32770", w_dialog_title.c_str()); hwnd && IsWindow(hwnd)) {
+        // 关闭可能还在显示的对话框
+        if (HWND hwnd = FindWindowW(L"#32770", dialog_title.c_str()); hwnd && IsWindow(hwnd)) {
           PostMessage(hwnd, WM_COMMAND, MAKEWPARAM(IDNO, BN_CLICKED), 0);
           PostMessage(hwnd, WM_CLOSE, 0, 0);
 
@@ -529,8 +565,10 @@ namespace display_device {
           }
         }
 
-        destroy_vdd_monitor();
-      }).detach();
+        if (!stoken.stop_requested()) {
+          destroy_vdd_monitor();
+        }
+      });
 
       return true;
     }
