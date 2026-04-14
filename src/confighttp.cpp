@@ -498,8 +498,7 @@ namespace confighttp {
   }
 
   /**
-   * @brief Snapshot of the log cache state.
-   * All fields are immutable once constructed; swapped atomically via shared_ptr.
+   * @brief Snapshot of log cache state, swapped atomically via shared_ptr.
    */
   struct LogCacheSnapshot {
     std::shared_ptr<const std::string> content;  ///< Cached log content (nullptr in offset-only mode)
@@ -530,26 +529,6 @@ namespace confighttp {
       return nullptr;
     }
     return std::make_shared<const std::string>(*old_content + tail);
-  }
-
-  /**
-   * @brief Read the last max_bytes of a file directly from disk.
-   */
-  static std::shared_ptr<const std::string>
-  read_file_tail(const std::filesystem::path &path, std::uintmax_t max_bytes) {
-    std::ifstream in(path.string(), std::ios::binary);
-    if (!in) {
-      return nullptr;
-    }
-    in.seekg(0, std::ios::end);
-    auto file_size = static_cast<std::uintmax_t>(in.tellg());
-    auto read_size = std::min(file_size, max_bytes);
-    in.seekg(-static_cast<std::streamoff>(read_size), std::ios::end);
-    std::string content(static_cast<std::size_t>(read_size), '\0');
-    if (!in.read(content.data(), static_cast<std::streamsize>(read_size))) {
-      return nullptr;
-    }
-    return std::make_shared<const std::string>(std::move(content));
   }
 
   /**
@@ -605,22 +584,17 @@ namespace confighttp {
       SimpleWeb::CaseInsensitiveMultimap headers;
       headers.emplace("Content-Type", "text/plain; charset=utf-8");
       headers.emplace("Content-Disposition", "attachment; filename=\"sunshine.log\"");
-      // Omit Content-Length: log file is actively written, so size may change
-      // between file_size() and the end of the stream (TOCTOU). Letting the
-      // server use chunked transfer encoding avoids truncation or hang.
+      // Omit Content-Length: log file is actively written (TOCTOU risk)
       response->write(SimpleWeb::StatusCode::success_ok, in, headers);
       return;
     }
 
     // --- Mode 2: X-Log-Offset present → cached or offset-only mode for live viewer ---
 
-    // When file ≤ MAX_LOG_CACHE_SIZE: entire file cached in memory (cached mode).
-    // When file > MAX_LOG_CACHE_SIZE: no content in memory, reads go to disk (offset-only mode).
-    // MAX_RESPONSE_SIZE caps a single response to avoid large allocations.
+    // When file ≤ MAX_LOG_CACHE_SIZE: cached in memory.  Otherwise: disk reads only.
     static constexpr std::uintmax_t MAX_LOG_CACHE_SIZE = 4 * 1024 * 1024;   // 4 MB
     static constexpr std::uintmax_t MAX_RESPONSE_SIZE  = 4 * 1024 * 1024;   // 4 MB
 
-    // Single atomic snapshot ensures all cache fields are consistent across threads.
     static std::atomic<std::shared_ptr<const LogCacheSnapshot>> log_cache;
 
     // Check file status
@@ -652,7 +626,10 @@ namespace confighttp {
           new_content = try_incremental_log_read(log_path, snapshot->file_size, current_size, snapshot->content);
         }
         if (!new_content) {
-          new_content = read_file_tail(log_path, MAX_LOG_CACHE_SIZE);
+          // Use sampled current_size to avoid TOCTOU unsigned underflow at start_offset
+          auto read_len = std::min(current_size, MAX_LOG_CACHE_SIZE);
+          auto read_start = current_size - read_len;
+          new_content = read_file_range(log_path, read_start, read_len);
         }
         if (!new_content) {
           new_content = std::make_shared<const std::string>();
@@ -670,8 +647,13 @@ namespace confighttp {
         new_snap->start_offset = 0;
       }
 
-      log_cache.store(new_snap);
-      snapshot = std::move(new_snap);
+      // CAS publish: avoid overwriting a newer snapshot from a concurrent thread
+      if (!log_cache.compare_exchange_strong(snapshot, new_snap)) {
+        // CAS failed: snapshot already updated by compare_exchange_strong
+      }
+      else {
+        snapshot = std::move(new_snap);
+      }
     }
 
     // Parse client offset
@@ -717,11 +699,10 @@ namespace confighttp {
       }
     }
     else {
-      // === Offset-only mode: read directly from disk ===
+      // === Offset-only mode: read from disk, bounded by snapshot->file_size ===
       if (client_offset > 0 && client_offset < snapshot->file_size) {
         auto delta_size = snapshot->file_size - client_offset;
         if (delta_size <= MAX_RESPONSE_SIZE) {
-          // Delta fits in one response: read from client_offset to end of file
           auto data = read_file_range(log_path, client_offset, delta_size);
           if (data) {
             headers.emplace("X-Log-Range", "incremental");
@@ -729,25 +710,17 @@ namespace confighttp {
             return;
           }
         }
-        // Delta too large or read failed: return last MAX_RESPONSE_SIZE bytes
-        auto tail = read_file_tail(log_path, MAX_RESPONSE_SIZE);
-        if (!tail) {
-          response->write(SimpleWeb::StatusCode::server_error_internal_server_error, "Failed to read log file");
-          return;
-        }
-        headers.emplace("X-Log-Range", "full");
-        response->write(SimpleWeb::StatusCode::success_ok, *tail, headers);
       }
-      else {
-        // First request or invalid offset: return tail
-        auto tail = read_file_tail(log_path, MAX_RESPONSE_SIZE);
-        if (!tail) {
-          response->write(SimpleWeb::StatusCode::server_error_internal_server_error, "Failed to read log file");
-          return;
-        }
-        headers.emplace("X-Log-Range", "full");
-        response->write(SimpleWeb::StatusCode::success_ok, *tail, headers);
+      // Delta too large, read failed, or first request: return tail up to snapshot->file_size
+      auto tail_len = std::min(snapshot->file_size, MAX_RESPONSE_SIZE);
+      auto tail_start = snapshot->file_size - tail_len;
+      auto tail = read_file_range(log_path, tail_start, tail_len);
+      if (!tail) {
+        response->write(SimpleWeb::StatusCode::server_error_internal_server_error, "Failed to read log file");
+        return;
       }
+      headers.emplace("X-Log-Range", "full");
+      response->write(SimpleWeb::StatusCode::success_ok, *tail, headers);
     }
   }
 
