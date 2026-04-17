@@ -217,6 +217,12 @@ namespace logging {
     const auto log_filename = fs::path(log_file).filename().string();
 
     if (max_log_size_mb > 0) {
+      // When restore_log is false, truncate the existing log file before starting rotation
+      if (!config::sunshine.restore_log && fs::exists(log_file)) {
+        std::error_code ec;
+        fs::remove(log_file, ec);
+      }
+
       // Use text_file_backend with automatic size-based rotation
       auto file_backend = boost::make_shared<bl::sinks::text_file_backend>(
         bl::keywords::file_name = log_file,
