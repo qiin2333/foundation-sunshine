@@ -642,7 +642,6 @@ namespace display_device::w_utils {
     UINT32 base_flags = active_only ? QDC_ONLY_ACTIVE_PATHS : QDC_ALL_PATHS;
 
     // Try with QDC_VIRTUAL_MODE_AWARE first (supported from W10), then fallback without it.
-    LONG last_error = ERROR_SUCCESS;
     for (bool virtual_mode_aware : { true, false }) {
       UINT32 flags = base_flags | (virtual_mode_aware ? QDC_VIRTUAL_MODE_AWARE : 0);
 
@@ -681,10 +680,8 @@ namespace display_device::w_utils {
       } while (result == ERROR_INSUFFICIENT_BUFFER);
 
       if (result == ERROR_SUCCESS) {
-        return path_and_mode_data_t { paths, modes };
+        return path_and_mode_data_t { std::move(paths), std::move(modes) };
       }
-
-      last_error = result;
 
       if (virtual_mode_aware) {
         BOOST_LOG(warning) << get_error_string(result) << " failed to query display paths and modes with QDC_VIRTUAL_MODE_AWARE, retrying without...";
@@ -695,9 +692,7 @@ namespace display_device::w_utils {
       return boost::none;
     }
 
-    // Both attempts failed (only reachable if GetDisplayConfigBufferSizes failed on fallback too)
-    BOOST_LOG(error) << get_error_string(last_error) << " failed to query display paths and modes (all attempts exhausted)!";
-    return boost::none;
+    return boost::none;  // unreachable: loop always returns in both iterations
   }
 
   const DISPLAYCONFIG_PATH_INFO *
