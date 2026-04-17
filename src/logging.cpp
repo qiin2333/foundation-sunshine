@@ -186,7 +186,7 @@ namespace logging {
    */
   [[nodiscard]] std::unique_ptr<deinit_t>
   init(int min_log_level, const std::string &log_file, bool restore_log) {
-    if (console_sink || file_sink_ptr) {
+    if (console_sink || file_sink_ptr || file_ostream_sink) {
       // Deinitialize the logging system before reinitializing it. This can probably only ever be hit in tests.
       deinit();
     }
